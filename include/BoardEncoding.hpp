@@ -18,7 +18,7 @@ constexpr float BlackCode(float value)
 
 constexpr std::size_t MatrixRowFromSquare(int square)
 {
-    // Rząd 0 = 8. ranga, rząd 7 = 1. ranga, czyli standardowy widok planszy.
+   
     return 7u - static_cast<std::size_t>(square / 8);
 }
 
@@ -40,7 +40,7 @@ inline void PutPiece(EncodedBoard matrix, BB piece, float code)
 
 constexpr float EncodePawn(int file)
 {
-    // 1.1 ... 1.8, gdzie część dziesiętna rozróżnia pionki po pliku.
+
     return 1.0f + (static_cast<float>(file) + 1.0f) * 0.1f;
 }
 
@@ -86,7 +86,7 @@ constexpr float EncodeKing()
 
 inline void EncodeBoardToMatrix(const Board& board, EncodedBoard matrix)
 {
-    // Czarne figury.
+  
     PutPiece(matrix, board.BRookLeft, BlackCode(EncodeRookLeft()));
     PutPiece(matrix, board.BRookRight, BlackCode(EncodeRookRight()));
     PutPiece(matrix, board.BBishopLeft, BlackCode(EncodeBishopLeft()));
@@ -105,7 +105,7 @@ inline void EncodeBoardToMatrix(const Board& board, EncodedBoard matrix)
     PutPiece(matrix, board.BPawn_g2, BlackCode(EncodePawn(6)));
     PutPiece(matrix, board.BPawn_h2, BlackCode(EncodePawn(7)));
 
-    // Białe figury.
+
     PutPiece(matrix, board.WRookLeft, WhiteCode(EncodeRookLeft()));
     PutPiece(matrix, board.WRookRight, WhiteCode(EncodeRookRight()));
     PutPiece(matrix, board.WBishopLeft, WhiteCode(EncodeBishopLeft()));
