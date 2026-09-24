@@ -8,7 +8,7 @@ project(
 
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# 1. Generator korzysta tylko ze swojego pliku i z Fortranu
+
 add_executable(
     KoalaDataGen
     src/generator.cpp
@@ -19,10 +19,10 @@ target_include_directories(
     KoalaDataGen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Ścieżka do pliku binarnego w katalogu głównym
+
 set(BIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/fft_32x8x8.bin")
 
-# 2. Automatyczne obliczenia (odpalą się TYLKO gdy zmieni się src/generator.cpp lub Fortran!)
+
 add_custom_command(
     OUTPUT ${BIN_FILE}
     COMMAND KoalaDataGen "${BIN_FILE}"
@@ -30,7 +30,7 @@ add_custom_command(
     COMMENT "Automatyczne obliczenia: Fortran generuje plik .bin..."
 )
 
-# 3. Główny projekt silnika szachowego Koala1 (Czysty C++, bez Fortranu!)
+
 add_executable(
     Koala1
     main.cpp
