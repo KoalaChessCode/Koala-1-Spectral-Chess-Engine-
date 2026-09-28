@@ -6,6 +6,7 @@
 
 using std::uint64_t;
 using std::uint8_t;
+using std::uint32_t;
 
 typedef uint64_t BB;
 typedef uint8_t U8;
@@ -43,10 +44,8 @@ constexpr U8 CASTLE_BLACK_KINGSIDE  = 211;
 constexpr U8 CASTLE_BLACK_QUEENSIDE = 212;
 
 
-constexpr std::size_t CHILDREN = 64;
-
-constexpr bool WHITE = true;
-constexpr bool BLACK = true;
+bool WHITE = true;
+bool BLACK = true;
 
 struct Board
 {

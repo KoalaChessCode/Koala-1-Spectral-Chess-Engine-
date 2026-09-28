@@ -1,6 +1,8 @@
 struct Arena
 {
     static constexpr std::size_t SIZE = 1024 * 1024;
+    //static constexpr std::size_t SIZE = 256 * 1024 * 1024; 256MB
+
 
     std::array<std::byte, SIZE> arena{};
     std::size_t offset = 0;

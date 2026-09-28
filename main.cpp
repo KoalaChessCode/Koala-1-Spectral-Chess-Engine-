@@ -1,5 +1,5 @@
-#include "Helpers.hpp"
 #include "Puct.hpp"
+#include "Thread.hpp"
 #include "Pipeline.hpp"
 #include "events.hpp"
 #include "Listener.hpp"
@@ -8,14 +8,19 @@ alignas(64) static unsigned char EmbeddedFftBlob[] = {
     #embed "fft_32x8x8.bin"
 };
 
+
+
 int main (void){
-    auto& ptr = InitSpectrum(EmbeddedFftBlob);
+    PipelineContext Context;
     constexpr PawnTables PawnMemorandum{};
-    Board Plank;
-    GameState InstanceOne(Plank);
-    TreeStateWrapper treeState(1000);
-    
-    uci::Listener listener;
+    TreeStateWrapper Tree;
+    RunPipeline(Tree,0,PawnMemorandum,true,Context,EmbeddedFftBlob);
+
+    return 0;
+}
+
+/*
+ uci::Listener listener;
 
     listener.addListener(uci::event::UCI, [](uci::arguments_t) {
         std::cout << "uciok\n";
@@ -42,21 +47,6 @@ int main (void){
 
     listener.setupListener();
 
-    AllWhiteLegalMoves(
-        InstanceOne.WhiteMoves,
-        InstanceOne.WhiteCount,
-        InstanceOne,
-        PawnMemorandum
-    );
 
 
-     AllBlackLegalMoves(
-        InstanceOne,
-        PawnMemorandum,
-        InstanceOne.BlackMoves,
-        InstanceOne.BlackCount
-    );
-
-    return 0;
-}
-
+*/
