@@ -1,48 +1,46 @@
 #pragma once
-#include <array>
-#include <utility> 
 
-constexpr size_t HEADER_SIZE      = 64;  // bytes
-constexpr size_t FIGURE_COUNT     = 32;
-constexpr size_t FFT_CHANNELS     = 64;
-constexpr size_t FIGURE_FEATURES  = 128; // 64 Real + 64 Imag
+#include <cstddef>
+#include <cstdint>
 
-constexpr int N    = 32;
-constexpr int F_IN = 128;
+template <std::size_t N>
+inline void InitSpectrum(
+    const unsigned char (&blob)[N],
+    FFTWorking& fft
+) noexcept
+{
+    constexpr std::size_t HeaderSize = 64;
+    constexpr std::size_t Channels   = 32;
+    constexpr std::size_t Rows       = 8;
+    constexpr std::size_t Cols       = 8;
+    constexpr std::size_t Values     = Rows * Cols;
 
-constexpr int F_L1 = 64;
-constexpr int F_L2 = 32;
-constexpr int F_L3 = 16;
+    static_assert(
+        N >= HeaderSize + Channels * Values * sizeof(float) * 2
+    );
 
-using Matrix = std::array<std::array<float, FIGURE_FEATURES>, FIGURE_COUNT>;
-alignas(64) static Matrix clean_channels;
+    const float* source =
+        reinterpret_cast<const float*>(blob + HeaderSize);
 
+    for (std::size_t channel = 0;
+         channel < Channels;
+         ++channel)
+    {
+        const float* src =
+            source + channel * Values * 2;
 
-template <size_t N>
-auto& InitSpectrum(const unsigned char (&blob)[N]){
-    const float* raw_floats_bin = reinterpret_cast<const float*>(blob + HEADER_SIZE);
+        float* real =
+            &fft.real[channel][0][0];
 
-    // Metaprogramming that unrolls the channel loop at compile time (no "for" loop in the machine code)
-    [&]<size_t... Is>(std::index_sequence<Is...>) {
-        (..., ([&]() {
-            size_t ch = Is; // Current channel index (0 to 31)
-            
-            // Direct reference access to the internal std::array for a given figure
-            float* dest_real = clean_channels[ch].data();              // First 64 slots for Real
-            float* dest_imag = &(clean_channels[ch][FFT_CHANNELS]);      // Next 64 slots for Imag
-            
-            // Starting point for reading from the interleaved binary file
-            const float* read_bin = &raw_floats_bin[ch * (FFT_CHANNELS * 2)];
+        float* imag =
+            &fft.imag[channel][0][0];
 
-            // Unpacking the binary interleave (compiler vectorizes this using SIMD)
-            #pragma GCC unroll 64
-            for (size_t k = 0; k < FFT_CHANNELS; ++k) {
-                dest_real[k] = read_bin[2 * k];
-                dest_imag[k] = read_bin[2 * k + 1];
-            }
-        }()));
-    }(std::make_index_sequence<FIGURE_COUNT>{});
-
-    // Returns the entire packed std::array structure by reference (compiler optimizes this to 0ns)
-    return clean_channels;
+        for (std::size_t i = 0;
+             i < Values;
+             ++i)
+        {
+            real[i] = src[i * 2];
+            imag[i] = src[i * 2 + 1];
+        }
+    }
 }

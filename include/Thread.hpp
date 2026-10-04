@@ -7,7 +7,7 @@ struct PipelineContext
   
     std::atomic<bool> guard{true};
 
-ku
+
     inline void Stop() noexcept {
         guard.store(false, std::memory_order_relaxed);
     }

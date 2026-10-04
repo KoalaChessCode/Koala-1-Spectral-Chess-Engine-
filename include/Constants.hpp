@@ -44,6 +44,7 @@ constexpr U8 CASTLE_BLACK_KINGSIDE  = 211;
 constexpr U8 CASTLE_BLACK_QUEENSIDE = 212;
 
 
+
 bool WHITE = true;
 bool BLACK = true;
 

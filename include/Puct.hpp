@@ -1,12 +1,14 @@
 #pragma once
 #include "Constants.hpp"
 #include "memory.hpp"
+#include "Delta.hpp"
 
 
 template<typename T>
 struct Node
 {
     T position{};
+    FftDelta fftDelta{};
 };
 
 template<typename T>
@@ -15,84 +17,164 @@ struct Tree
     Node<T>* nodes;
 
     std::uint32_t* childBegin;
-    std::uint16_t* childCount;
-    std::uint32_t* parentIndex;
 
-    std::size_t size;
-    std::size_t capacity;
+    std::uint16_t* childCount;
+
+    std::uint32_t* parentIndex;
 
     Move* moves;
 
-    Tree(Arena& arena, std::size_t maxNodes)
+    std::size_t size;
+
+    std::size_t capacity;
+
+
+    Tree(
+        Arena& arena,
+        std::size_t maxNodes
+    )
         :
-        nodes(arena.allocate<Node<T>>(maxNodes)),
-        childBegin(arena.allocate<std::uint32_t>(maxNodes)),
-        childCount(arena.allocate<std::uint16_t>(maxNodes)),
-        parentIndex(arena.allocate<std::uint32_t>(maxNodes)),
+        nodes(
+            arena.allocate<Node<T>>(maxNodes)
+        ),
+
+        childBegin(
+            arena.allocate<std::uint32_t>(
+                maxNodes
+            )
+        ),
+
+        childCount(
+            arena.allocate<std::uint16_t>(
+                maxNodes
+            )
+        ),
+
+        parentIndex(
+            arena.allocate<std::uint32_t>(
+                maxNodes
+            )
+        ),
+
+        moves(
+            arena.allocate<Move>(
+                maxNodes
+            )
+        ),
+
         size(1),
-        capacity(maxNodes),
-        moves(arena.allocate<Move>(maxNodes))
+
+        capacity(maxNodes)
     {
-        // Construct all Node<T>
-        for (std::size_t i = 0; i < maxNodes; ++i)
+        for (std::size_t i = 0;
+             i < maxNodes;
+             ++i)
         {
-            std::construct_at(&nodes[i]);
+            std::construct_at(
+                &nodes[i]
+            );
+
+            childBegin[i] = 0;
+            childCount[i] = 0;
+            parentIndex[i] = 0;
         }
 
         parentIndex[0] = 0;
         childBegin[0] = 0;
         childCount[0] = 0;
+
+        // Root nie ma delty.
+        nodes[0].fftDelta = {};
     }
 
-    Node<T>& At(std::size_t index)
+
+    Node<T>& At(
+        std::size_t index
+    )
     {
         return nodes[index];
     }
 
-    Node<T>& Parent(std::size_t index)
+
+    const Node<T>& At(
+        std::size_t index
+    ) const
     {
-        return nodes[parentIndex[index]];
+        return nodes[index];
     }
+
+
+    Node<T>& Parent(
+        std::size_t index
+    )
+    {
+        return nodes[
+            parentIndex[index]
+        ];
+    }
+
 
     Node<T>& Child(
         std::size_t parent,
         std::size_t child
     )
     {
-        return nodes[childBegin[parent] + child];
+        return nodes[
+            childBegin[parent] + child
+        ];
     }
 
-    std::uint32_t ChildBegin(std::size_t parent) const
+
+    std::uint32_t ChildBegin(
+        std::size_t parent
+    ) const
     {
         return childBegin[parent];
     }
 
-    std::uint16_t ChildCount(std::size_t parent) const
+
+    std::uint16_t ChildCount(
+        std::size_t parent
+    ) const
     {
         return childCount[parent];
     }
 
-    bool IsLeaf(std::size_t index) const
+
+    bool IsLeaf(
+        std::size_t index
+    ) const
     {
         return childCount[index] == 0;
     }
 
-    Node<T>& CreateChild(std::uint32_t parentIdx)
+
+    Node<T>& CreateChild(
+        std::uint32_t parentIdx
+    )
     {
         if (size >= capacity)
-            throw std::out_of_range("Tree full");
+            throw std::out_of_range(
+                "Tree full"
+            );
 
-        std::uint32_t newChildIdx =
-            static_cast<std::uint32_t>(size++);
+        const std::uint32_t newChildIdx =
+            static_cast<std::uint32_t>(
+                size++
+            );
 
         if (childCount[parentIdx] == 0)
-            childBegin[parentIdx] = newChildIdx;
+            childBegin[parentIdx] =
+                newChildIdx;
 
         childCount[parentIdx]++;
-        parentIndex[newChildIdx] = parentIdx;
+
+        parentIndex[newChildIdx] =
+            parentIdx;
 
         return nodes[newChildIdx];
     }
+
 
     std::uint32_t CreateChildren(
         std::uint32_t parentIdx,
@@ -102,21 +184,31 @@ struct Tree
         if (size + count > capacity)
             return UINT32_MAX;
 
-        std::uint32_t first =
-            static_cast<std::uint32_t>(size);
+        const std::uint32_t first =
+            static_cast<std::uint32_t>(
+                size
+            );
 
-        childBegin[parentIdx] = first;
-        childCount[parentIdx] = count;
+        childBegin[parentIdx] =
+            first;
 
-        for (std::uint16_t i = 0; i < count; ++i)
+        childCount[parentIdx] =
+            count;
+
+        for (std::uint16_t i = 0;
+             i < count;
+             ++i)
         {
-            parentIndex[size] = parentIdx;
+            parentIndex[size] =
+                parentIdx;
+
             ++size;
         }
 
         return first;
     }
 };
+
 
 struct TreeStateWrapper
 {

@@ -3,6 +3,7 @@
 #include "Pipeline.hpp"
 #include "events.hpp"
 #include "Listener.hpp"
+#include "Helpers.hpp"
 
 alignas(64) static unsigned char EmbeddedFftBlob[] = {
     #embed "fft_32x8x8.bin"
@@ -10,17 +11,22 @@ alignas(64) static unsigned char EmbeddedFftBlob[] = {
 
 
 
+
+
 int main (void){
     PipelineContext Context;
     constexpr PawnTables PawnMemorandum{};
     TreeStateWrapper Tree;
-    RunPipeline(Tree,0,PawnMemorandum,true,Context,EmbeddedFftBlob);
+    alignas(64) FFTWorking WorkingFFT{};
+    InitSpectrum(EmbeddedFftBlob,WorkingFFT);
 
-    return 0;
-}
 
-/*
- uci::Listener listener;
+    RunPipeline(Tree,0,PawnMemorandum,true,Context,WorkingFFT);
+
+
+
+
+     uci::Listener listener;
 
     listener.addListener(uci::event::UCI, [](uci::arguments_t) {
         std::cout << "uciok\n";
@@ -49,4 +55,9 @@ int main (void){
 
 
 
-*/
+
+    
+    return 0;
+}
+
+

@@ -19,6 +19,19 @@ target_include_directories(
     KoalaDataGen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+# DODANE: Dokładnie te same flagi co niżej, aby generator też wiedział o C++23/26 i bfloat16_t
+target_compile_options(
+    KoalaDataGen
+    PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:
+        -std=c++2c
+        -Wall 
+        -Wextra
+        -march=native
+        -O3
+    >
+)
+
 # Ścieżka do pliku binarnego w katalogu głównym
 set(BIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/fft_32x8x8.bin")
 
@@ -55,5 +68,3 @@ target_compile_options(
         -embed-dir=${CMAKE_CURRENT_SOURCE_DIR}
     >
 )
-
-
