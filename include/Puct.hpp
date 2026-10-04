@@ -83,7 +83,6 @@ struct Tree
         childBegin[0] = 0;
         childCount[0] = 0;
 
-        // Root nie ma delty.
         nodes[0].fftDelta = {};
     }
 
