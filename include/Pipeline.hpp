@@ -23,7 +23,10 @@
 //
 // ===========================================================================
 
-template<typename GameStateType>
+template<
+    bool White,
+    typename GameStateType
+>
 inline void StoreChildWithFftDelta(
     Tree<Board>& tree,
     std::uint32_t parentIndex,
@@ -35,9 +38,30 @@ inline void StoreChildWithFftDelta(
     const Board& parentBoard =
         tree.At(parentIndex).position;
 
-    StateUndo undo;
-}
+    StateUndo undo =
+        MakeMove<White>(
+            instance,
+            move
+        );
 
+    tree.At(childIndex).position =
+        instance.board;
+
+    tree.moves[childIndex] =
+        move;
+
+    tree.At(childIndex).fftDelta =
+        MakeFftDelta(
+            parentBoard,
+            instance.board
+        );
+
+    UnmakeMove<White>(
+        instance,
+        move,
+        undo
+    );
+}
 
 template<typename T, typename Y, typename U>
 void AllWhiteLegalMoves(
@@ -163,315 +187,198 @@ void RunPipeline(
         // EXPAND
         // ====================================================
 
-        if (!current.expanded)
+        // ====================================================
+// EXPAND
+// ====================================================
+
+if (!current.expanded)
+{
+    current.expanded = true;
+
+
+    // =================================================
+    // WHITE
+    // =================================================
+
+    if (current.whiteToMove)
+    {
+        InstanceOne
+            .WhiteMoves
+            .WhiteMoves
+            .fill({});
+
+        InstanceOne
+            .WhiteMoves
+            .Count = 0;
+
+        InstanceOne.WhiteCount = 0;
+
+
+        AllWhiteLegalMoves(
+            InstanceOne.WhiteMoves,
+            InstanceOne.WhiteCount,
+            InstanceOne,
+            pawnTable
+        );
+
+
+        if (InstanceOne.WhiteCount == 0)
         {
-            current.expanded = true;
-
-
-            // =================================================
-            // WHITE
-            // =================================================
-
-            if (current.whiteToMove)
-            {
-                InstanceOne
-                    .WhiteMoves
-                    .WhiteMoves
-                    .fill({});
-
-                InstanceOne
-                    .WhiteMoves
-                    .Count = 0;
-
-                InstanceOne.WhiteCount = 0;
-
-
-                AllWhiteLegalMoves(
-                    InstanceOne.WhiteMoves,
-                    InstanceOne.WhiteCount,
-                    InstanceOne,
-                    pawnTable
+            current.childCount = 0;
+        }
+        else
+        {
+            current.firstChild =
+                St.tree.CreateChildren(
+                    current.nodeIndex,
+                    static_cast<
+                        std::uint16_t
+                    >(
+                        InstanceOne.WhiteCount
+                    )
                 );
 
 
-                if (InstanceOne.WhiteCount == 0)
-                {
-                    current.childCount = 0;
-                }
-                else
-                {
-                    current.firstChild =
-                        St.tree.CreateChildren(
-                            current.nodeIndex,
-                            static_cast<
-                                std::uint16_t
-                            >(
-                                InstanceOne.WhiteCount
-                            )
-                        );
-
-
-                    if (
-                        current.firstChild ==
-                        UINT32_MAX
-                    )
-                    {
-                        return;
-                    }
-
-
-                    current.childCount =
-                        static_cast<
-                            std::uint16_t
-                        >(
-                            InstanceOne.WhiteCount
-                        );
-
-
-                    // =========================================
-                    // CREATE CHILDREN
-                    // =========================================
-
-                    for (
-                        std::uint16_t i = 0;
-                        i < current.childCount;
-                        ++i
-                    )
-                    {
-                        const std::uint32_t childIndex =
-                            current.firstChild + i;
-
-
-                        const Move move =
-                            InstanceOne
-                                .WhiteMoves
-                                .WhiteMoves[i];
-
-
-                        // -------------------------------------
-                        // PARENT BOARD
-                        // -------------------------------------
-
-                        const Board& parentBoard =
-                            St.tree
-                                .At(current.nodeIndex)
-                                .position;
-
-
-                        // -------------------------------------
-                        // MAKE
-                        // -------------------------------------
-
-                        StateUndo undo =
-                            MakeMove<true>(
-                                InstanceOne,
-                                move
-                            );
-
-
-                        // -------------------------------------
-                        // CHILD BOARD
-                        // -------------------------------------
-
-                        St.tree
-                            .At(childIndex)
-                            .position =
-                                InstanceOne.board;
-
-
-                        // -------------------------------------
-                        // MOVE
-                        // -------------------------------------
-
-                        St.tree.moves[
-                            childIndex
-                        ] = move;
-
-
-                        // -------------------------------------
-                        // FFT DELTA
-                        //
-                        // parent -> child
-                        //
-                        // Obsługuje automatycznie:
-                        //
-                        // quiet
-                        // capture
-                        // promotion
-                        // en passant
-                        // castling
-                        // -------------------------------------
-
-                        St.tree
-                            .At(childIndex)
-                            .fftDelta =
-                                MakeFftDelta(
-                                    parentBoard,
-                                    InstanceOne.board
-                                );
-
-
-                        // -------------------------------------
-                        // UNMAKE
-                        // -------------------------------------
-
-                        UnmakeMove<true>(
-                            InstanceOne,
-                            move,
-                            undo
-                        );
-                    }
-                }
+            if (
+                current.firstChild ==
+                UINT32_MAX
+            )
+            {
+                return;
             }
 
 
-            // =================================================
-            // BLACK
-            // =================================================
-
-            else
-            {
-                InstanceOne
-                    .BlackMoves
-                    .BlackMoves
-                    .fill({});
-
-                InstanceOne
-                    .BlackMoves
-                    .Count = 0;
-
-                InstanceOne.BlackCount = 0;
-
-
-                AllBlackLegalMoves(
-                    InstanceOne.BlackMoves,
-                    InstanceOne.BlackCount,
-                    InstanceOne,
-                    pawnTable
+            current.childCount =
+                static_cast<
+                    std::uint16_t
+                >(
+                    InstanceOne.WhiteCount
                 );
 
 
-                if (InstanceOne.BlackCount == 0)
-                {
-                    current.childCount = 0;
-                }
-                else
-                {
-                    current.firstChild =
-                        St.tree.CreateChildren(
-                            current.nodeIndex,
-                            static_cast<
-                                std::uint16_t
-                            >(
-                                InstanceOne.BlackCount
-                            )
-                        );
+            // =========================================
+            // CREATE CHILDREN
+            // =========================================
+
+            for (
+                std::uint16_t i = 0;
+                i < current.childCount;
+                ++i
+            )
+            {
+                const std::uint32_t childIndex =
+                    current.firstChild + i;
 
 
-                    if (
-                        current.firstChild ==
-                        UINT32_MAX
-                    )
-                    {
-                        return;
-                    }
+                const Move move =
+                    InstanceOne
+                        .WhiteMoves
+                        .WhiteMoves[i];
 
 
-                    current.childCount =
-                        static_cast<
-                            std::uint16_t
-                        >(
-                            InstanceOne.BlackCount
-                        );
-
-
-                    // =========================================
-                    // CREATE CHILDREN
-                    // =========================================
-
-                    for (
-                        std::uint16_t i = 0;
-                        i < current.childCount;
-                        ++i
-                    )
-                    {
-                        const std::uint32_t childIndex =
-                            current.firstChild + i;
-
-
-                        const Move move =
-                            InstanceOne
-                                .BlackMoves
-                                .BlackMoves[i];
-
-
-                        // -------------------------------------
-                        // PARENT BOARD
-                        // -------------------------------------
-
-                        const Board& parentBoard =
-                            St.tree
-                                .At(current.nodeIndex)
-                                .position;
-
-
-                        // -------------------------------------
-                        // MAKE
-                        // -------------------------------------
-
-                        StateUndo undo =
-                            MakeMove<false>(
-                                InstanceOne,
-                                move
-                            );
-
-
-                        // -------------------------------------
-                        // CHILD BOARD
-                        // -------------------------------------
-
-                        St.tree
-                            .At(childIndex)
-                            .position =
-                                InstanceOne.board;
-
-
-                        // -------------------------------------
-                        // MOVE
-                        // -------------------------------------
-
-                        St.tree.moves[
-                            childIndex
-                        ] = move;
-
-
-                        // -------------------------------------
-                        // FFT DELTA
-                        // -------------------------------------
-
-                        St.tree
-                            .At(childIndex)
-                            .fftDelta =
-                                MakeFftDelta(
-                                    parentBoard,
-                                    InstanceOne.board
-                                );
-
-
-                        // -------------------------------------
-                        // UNMAKE
-                        // -------------------------------------
-
-                        UnmakeMove<false>(
-                            InstanceOne,
-                            move,
-                            undo
-                        );
-                    }
-                }
+                StoreChildWithFftDelta<true>(
+                    St.tree,
+                    current.nodeIndex,
+                    childIndex,
+                    InstanceOne,
+                    move
+                );
             }
         }
+    }
 
+
+    // =================================================
+    // BLACK
+    // =================================================
+
+    else
+    {
+        InstanceOne
+            .BlackMoves
+            .BlackMoves
+            .fill({});
+
+        InstanceOne
+            .BlackMoves
+            .Count = 0;
+
+        InstanceOne.BlackCount = 0;
+
+
+        AllBlackLegalMoves(
+            InstanceOne.BlackMoves,
+            InstanceOne.BlackCount,
+            InstanceOne,
+            pawnTable
+        );
+
+
+        if (InstanceOne.BlackCount == 0)
+        {
+            current.childCount = 0;
+        }
+        else
+        {
+            current.firstChild =
+                St.tree.CreateChildren(
+                    current.nodeIndex,
+                    static_cast<
+                        std::uint16_t
+                    >(
+                        InstanceOne.BlackCount
+                    )
+                );
+
+
+            if (
+                current.firstChild ==
+                UINT32_MAX
+            )
+            {
+                return;
+            }
+
+
+            current.childCount =
+                static_cast<
+                    std::uint16_t
+                >(
+                    InstanceOne.BlackCount
+                );
+
+
+            // =========================================
+            // CREATE CHILDREN
+            // =========================================
+
+            for (
+                std::uint16_t i = 0;
+                i < current.childCount;
+                ++i
+            )
+            {
+                const std::uint32_t childIndex =
+                    current.firstChild + i;
+
+
+                const Move move =
+                    InstanceOne
+                        .BlackMoves
+                        .BlackMoves[i];
+
+
+                StoreChildWithFftDelta<false>(
+                    St.tree,
+                    current.nodeIndex,
+                    childIndex,
+                    InstanceOne,
+                    move
+                );
+            }
+        }
+    }
+}
 
         // ====================================================
         // NEXT CHILD

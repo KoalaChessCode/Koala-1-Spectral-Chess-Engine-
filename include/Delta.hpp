@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <cmath>
+#include <cassert>
 
 struct FftImpulse
 {
@@ -42,9 +43,7 @@ struct FftDelta
         float value
     ) noexcept
     {
-        // Legalny ruch nigdy nie powinien przekroczyć 4.
-        if (count >= impulses.size())
-            return;
+        assert(count < impulses.size());
 
         impulses[count++] = {
             channel,
@@ -225,24 +224,75 @@ constexpr std::size_t FFTColFromSquare(
     return static_cast<std::size_t>(square % 8);
 }
 
-// ============================================================
-// SINGLE IMPULSE -> FFT
-// ============================================================
-//
-// For the point:
-//
-//     value * delta(row,col)
-//
-// The 2D FFT yields:
-//
-//     value * exp(
-//         -2*pi*i *
-//
-//         (frequencyRow * row +
-//          frequencyCol * col) / 8
-//     )
-//
-// ============================================================
+
+
+struct FFTDataLUT
+{
+    std::array<float, 4096> cos_table{};
+    std::array<float, 4096> sin_table{};
+};
+
+constexpr auto MakeFFTLUT()
+{
+    FFTDataLUT lut{};
+
+    constexpr float Pi =
+        3.14159265358979323846f;
+
+    constexpr float TwoPi =
+        2.0f * Pi;
+
+    for (std::size_t inputRow = 0;
+         inputRow < 8;
+         ++inputRow)
+    {
+        for (std::size_t inputCol = 0;
+             inputCol < 8;
+             ++inputCol)
+        {
+            const std::size_t square =
+                inputRow * 8 + inputCol;
+
+            const std::size_t baseIndex =
+                square * 64;
+
+            for (std::size_t frequencyRow = 0;
+                 frequencyRow < 8;
+                 ++frequencyRow)
+            {
+                const std::size_t rowOffset =
+                    baseIndex + frequencyRow * 8;
+
+                for (std::size_t frequencyCol = 0;
+                     frequencyCol < 8;
+                     ++frequencyCol)
+                {
+                    const float phase =
+                        -TwoPi *
+                        static_cast<float>(
+                            frequencyRow * inputRow +
+                            frequencyCol * inputCol
+                        )
+                        / 8.0f;
+
+                    const std::size_t index =
+                        rowOffset + frequencyCol;
+
+                    lut.cos_table[index] =
+                        std::cos(phase);
+
+                    lut.sin_table[index] =
+                        std::sin(phase);
+                }
+            }
+        }
+    }
+
+    return lut;
+}
+
+alignas(64)
+inline constexpr auto FFTLUT = MakeFFTLUT();
 
 inline void ApplyImpulseFFT(
     FFTWorking& fft,
@@ -255,53 +305,45 @@ inline void ApplyImpulseFFT(
     const std::size_t inputCol =
         FFTColFromSquare(impulse.square);
 
-    constexpr float Pi =
-        3.14159265358979323846f;
+    const std::size_t baseIndex =
+        (inputRow * 8 + inputCol) * 64;
 
-    constexpr float TwoPi =
-        2.0f * Pi;
+    const auto channel =
+        impulse.channel;
 
+    const float value =
+        impulse.value;
+
+    auto* real =
+        fft.real[channel];
+
+    auto* imag =
+        fft.imag[channel];
+
+    #pragma GCC unroll 8
     for (std::size_t frequencyRow = 0;
          frequencyRow < 8;
          ++frequencyRow)
     {
+        const std::size_t rowOffset =
+            baseIndex + frequencyRow * 8;
+
         for (std::size_t frequencyCol = 0;
              frequencyCol < 8;
              ++frequencyCol)
         {
-            const float phase =
-                -TwoPi *
-                (
-                    static_cast<float>(
-                        frequencyRow * inputRow
-                    )
-                    +
-                    static_cast<float>(
-                        frequencyCol * inputCol
-                    )
-                )
-                / 8.0f;
+            const std::size_t index =
+                rowOffset + frequencyCol;
 
-            const float c =
-                std::cos(phase);
+            real[frequencyRow][frequencyCol] +=
+                value * FFTLUT.cos_table[index];
 
-            const float s =
-                std::sin(phase);
-
-            fft.real
-                [impulse.channel]
-                [frequencyRow]
-                [frequencyCol]
-                += impulse.value * c;
-
-            fft.imag
-                [impulse.channel]
-                [frequencyRow]
-                [frequencyCol]
-                += impulse.value * s;
+            imag[frequencyRow][frequencyCol] +=
+                value * FFTLUT.sin_table[index];
         }
     }
 }
+
 
 
 // ============================================================
