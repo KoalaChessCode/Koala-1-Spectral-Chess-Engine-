@@ -10,6 +10,29 @@ alignas(64) static unsigned char EmbeddedFftBlob[] = {
     #embed "fft_32x8x8.bin"
 };
 
+
+void debug(const TreeStateWrapper&, const FFTWorking&){
+    std::cerr << "[SIZE] Node<Board>: "
+              << sizeof(Node<Board>)
+              << " bytes\n";
+
+    std::cerr << "[SIZE] Move: "
+              << sizeof(Move)
+              << " bytes\n";
+
+    std::cerr << "[SIZE] Board: "
+          << sizeof(Board) << " B\n";
+
+    std::cerr << "[SIZE] FftImpulse: "
+          << sizeof(FftImpulse) << " B\n";
+
+    std::cerr << "[SIZE] FftDelta: "
+          << sizeof(FftDelta<4>) << " B\n";
+
+    std::cerr << "[SIZE] Node<Board>: "
+          << sizeof(Node<Board>) << " B\n";
+
+}
 int main(void)
 {
     PipelineContext Context;
@@ -18,29 +41,9 @@ int main(void)
     alignas(64) FFTWorking WorkingFFT{};
     InitSpectrum(EmbeddedFftBlob, WorkingFFT);
 
+    debug(Tree,WorkingFFT);
    
-      std::cerr << "[SIZE] Node<Board>: "
-              << sizeof(Node<Board>)
-              << " bytes\n";
-
-    std::cerr << "[SIZE] Move: "
-              << sizeof(Move)
-              << " bytes\n";
-
-
-
-              std::cerr << "[SIZE] Board: "
-          << sizeof(Board) << " B\n";
-
-std::cerr << "[SIZE] FftImpulse: "
-          << sizeof(FftImpulse) << " B\n";
-
-std::cerr << "[SIZE] FftDelta: "
-          << sizeof(FftDelta<4>) << " B\n";
-
-std::cerr << "[SIZE] Node<Board>: "
-          << sizeof(Node<Board>) << " B\n";
-
+      
 
     uci::Listener listener;
 
