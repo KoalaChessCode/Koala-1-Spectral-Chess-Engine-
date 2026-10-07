@@ -13,6 +13,8 @@ struct FftImpulse
     float value = 0.0f;
 };
 
+
+template<std::size_t N>
 struct FftDelta
 {
 // Maximum:
@@ -35,7 +37,7 @@ struct FftDelta
 //
 // => maximum 4 pulses.
     std::uint8_t count = 0;
-    std::array<FftImpulse, 4> impulses{};
+    std::array<FftImpulse, N> impulses{};
 
     inline void Add(
         std::uint8_t channel,
@@ -124,14 +126,18 @@ constexpr std::array<float, 32> FFTChannelCodes =
 //
 // ============================================================
 
-inline FftDelta MakeFftDelta(
+
+template<std::size_t N>
+inline FftDelta<N> MakeFftDelta(
     const Board& parent,
     const Board& child
 ) noexcept
 {
-    FftDelta delta;
+    FftDelta<N> delta;
 
-    for (std::uint8_t channel = 0; channel < 32; ++channel)
+    for (std::uint8_t channel = 0;
+         channel < 32;
+         ++channel)
     {
         const BB oldPieces = parent.Pieces[channel];
         const BB newPieces = child.Pieces[channel];
@@ -140,11 +146,6 @@ inline FftDelta MakeFftDelta(
             continue;
 
         const float code = FFTChannelCodes[channel];
-
-// ----------------------------------------------------
-// The piece disappears from the old square. 
-// ----------------------------------------------------
-
 
         if (oldPieces != 0)
         {
@@ -159,10 +160,6 @@ inline FftDelta MakeFftDelta(
                 -code
             );
         }
-
-    // ----------------------------------------------------
-// The piece appears on a new square. 
-// ----------------------------------------------------
 
         if (newPieces != 0)
         {
@@ -349,10 +346,10 @@ inline void ApplyImpulseFFT(
 // ============================================================
 // APPLY DELTA
 // ============================================================
-
+template<std::size_t N>
 inline void ApplyFftDelta(
     FFTWorking& fft,
-    const FftDelta& delta
+    const FftDelta<N>& delta
 ) noexcept
 {
     for (std::uint8_t i = 0;
@@ -389,9 +386,10 @@ inline void ApplyFftDelta(
 //
 // ============================================================
 
+template<std::size_t N>
 inline void RemoveFftDelta(
     FFTWorking& fft,
-    const FftDelta& delta
+     const FftDelta<N>& delta
 ) noexcept
 {
     for (std::uint8_t i = 0;
@@ -410,4 +408,6 @@ inline void RemoveFftDelta(
         );
     }
 }
+
+
 

@@ -8,7 +8,7 @@ template<typename T>
 struct Node
 {
     T position{};
-    FftDelta fftDelta{};
+    FftDelta<4> fftDelta{};
 };
 
 template<typename T>
@@ -209,17 +209,19 @@ struct Tree
 };
 
 
+//800000<---for 256MB
+//2000000<--for 2GB
 struct TreeStateWrapper
 {
     Arena memory;
     Tree<Board> tree;
 
-    TreeStateWrapper(std::size_t treeSize = 1000) //980000 dla 256 MB
-    :
-    memory(),
-    tree(memory, treeSize)
-{
-}
+    TreeStateWrapper(std::size_t treeSize = 800000)
+        :
+        memory(),
+        tree(memory, treeSize)
+    {
+    }
 };
 
 struct PUCT{

@@ -51,7 +51,7 @@ inline void StoreChildWithFftDelta(
         move;
 
     tree.At(childIndex).fftDelta =
-        MakeFftDelta(
+        MakeFftDelta<4>(
             parentBoard,
             instance.board
         );
@@ -437,12 +437,12 @@ if (!current.expanded)
             //
             // =================================================
 
-            ApplyFftDelta(
-                workingFFT,
-                St.tree
-                    .At(childIndex)
-                    .fftDelta
-            );
+            ApplyFftDelta<4>(
+            workingFFT,
+            St.tree
+            .At(childIndex)
+            .fftDelta
+);
 
 
             // =================================================

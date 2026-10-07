@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
+
 template <std::size_t N>
 inline void InitSpectrum(
     const unsigned char (&blob)[N],
@@ -44,3 +45,5 @@ inline void InitSpectrum(
         }
     }
 }
+
+

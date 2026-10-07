@@ -3,6 +3,10 @@
 #include <array>
 #include <cstddef>  
 #include <bit>
+#include <string>
+
+
+using std::string_view;
 
 using std::uint64_t;
 using std::uint8_t;
@@ -43,7 +47,7 @@ constexpr U8 CASTLE_WHITE_QUEENSIDE = 210;
 constexpr U8 CASTLE_BLACK_KINGSIDE  = 211;
 constexpr U8 CASTLE_BLACK_QUEENSIDE = 212;
 
-
+constexpr std::string_view INITIAL_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 bool WHITE = true;
 bool BLACK = true;
