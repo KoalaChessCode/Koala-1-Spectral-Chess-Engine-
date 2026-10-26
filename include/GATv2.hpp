@@ -135,10 +135,10 @@ using DefaultGATv2Config =
 // + 64 byte header
 // ============================================================
 //
-// UWAGA:
+// NOTE:
 //
-// EmbeddedFftBlob musi być zdefiniowany w main.cpp jako tablica
-// o znanym rozmiarze:
+// EmbeddedFftBlob must be defined in main.cpp as an array
+// of a known size:
 //
 // alignas(64)
 // unsigned char EmbeddedFftBlob[64 + 4096 * sizeof(float)];
@@ -703,13 +703,12 @@ bool forward(
             sizeof(float)
     );
 
-    // h_src_gpu zawiera wszystkie głowy:
-    // [head][dimension].
+ // h_src_gpu contains all heads:
+// [head][dimension].
     alignas(64) float h_src_gpu[EMBED_DIM];
-
-    // --------------------------------------------------------
-    // Projekcje GPU wszystkich głów albo CPU fallback.
-    // --------------------------------------------------------
+// --------------------------------------------------------
+// GPU projections for all heads, or CPU fallback. 
+// --------------------------------------------------------
 
     if (gpu != nullptr)
     {
@@ -730,8 +729,8 @@ bool forward(
             );
         }
 
-        // Wymaga kontekstu GPU zawierającego wagi
-        // wszystkich głów tej warstwy.
+       // Requires a GPU context containing the weights
+// for all heads in this layer.
         if (!gatv2_gpu_run(
                 gpu,
                 node_input,
@@ -800,9 +799,9 @@ bool forward(
         }
     }
 
-    // --------------------------------------------------------
-    // Attention, softmax i agregacja nadal na CPU.
-    // --------------------------------------------------------
+// --------------------------------------------------------
+// Attention, softmax, and aggregation are still on the CPU. 
+// --------------------------------------------------------
 
     for (int m = 0; m < NUM_HEADS; ++m)
     {
