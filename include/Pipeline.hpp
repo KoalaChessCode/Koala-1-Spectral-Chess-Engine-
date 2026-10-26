@@ -465,7 +465,7 @@ if (!current.expanded)
                 );
 
 
-                // Cofnij board.
+               
                 if (current.whiteToMove)
                 {
                     UnmakeMove<true>(
