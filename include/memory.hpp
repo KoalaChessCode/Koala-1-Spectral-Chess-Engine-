@@ -3,11 +3,11 @@
 
 struct Arena
 {
-    std::size_t size = 0;               // ← NEW
+    std::size_t size = 0;             
     std::unique_ptr<std::byte[]> arena;
     std::size_t offset = 0;
 
-    explicit Arena(std::size_t size_ = 256 * 1024 * 1024)   // ← NEW
+    explicit Arena(std::size_t size_ = 256 * 1024 * 1024) 
         : size(size_),
           arena(std::make_unique<std::byte[]>(size_))
     {
@@ -21,7 +21,7 @@ struct Arena
         const std::size_t aligned =
             (offset + alignment - 1) & ~(alignment - 1);
 
-        if (aligned + sizeof(T) > size)   // ← size, nie SIZE
+        if (aligned + sizeof(T) > size) 
             return nullptr;
 
         T* ptr = reinterpret_cast<T*>(arena.get() + aligned);
@@ -39,7 +39,7 @@ struct Arena
 
         const std::size_t bytes = sizeof(T) * count;
 
-        if (aligned + bytes > size)   // ← size, nie SIZE
+        if (aligned + bytes > size)  
             return nullptr;
 
         T* ptr = reinterpret_cast<T*>(arena.get() + aligned);
