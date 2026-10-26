@@ -3,18 +3,17 @@
 #include <chrono>
 
 //===========================================================================
-// GATv2 over tree
+// GATv2 over a tree
 // ===========================================================================
 //
-// DFS po istniejącym drzewie.
+// DFS traversal over an existing tree.
 //
-// Dla każdego węzła (depth >= 1):
-//   1. FFT węzła = FFT rodzica + delta węzła.
-//   2. Sąsiedzi = ostatnich HISTORY_K przodków.
+// For each node (depth >= 1):
+//   1. Node FFT = Parent FFT + node delta.
+//   2. Neighbors = the last HISTORY_K ancestors.
 //   3. GATv2 → embedding.
 //
 // ===========================================================================
-
 inline void RunGATv2OverTree(
     TreeStateWrapper& St,
     PipelineContext& ctx,
@@ -31,10 +30,9 @@ inline void RunGATv2OverTree(
         std::cerr << "[GATv2] ERROR: ring buffer not allocated\n";
         return;
     }
-
-    // --------------------------------------------------------
-    // Stos ramek DFS
-    // --------------------------------------------------------
+// --------------------------------------------------------
+// DFS frame stack
+// --------------------------------------------------------
     struct Frame
     {
         std::uint32_t nodeIndex;
@@ -45,10 +43,11 @@ inline void RunGATv2OverTree(
     std::size_t depth = 0;
 
     stack[0] = { 0, 0 };
-
-    // --------------------------------------------------------
-    // Root: FFT do slotu 0.
-    // --------------------------------------------------------
+    
+// -------------------------------------------------------- 
+// Root: FFT to slot 0. 
+// --------------------------------------------------------
+    
     std::memcpy(&fftHistory[0], &rootFFT, sizeof(FFTWorking));
 
     InterleaveFFT(
@@ -56,10 +55,9 @@ inline void RunGATv2OverTree(
         &fftHistory[0].imag[0][0][0],
         fftInterleaved + 0 * FFT_FLOATS
     );
-
-    // --------------------------------------------------------
-    // Statystyki
-    // --------------------------------------------------------
+// --------------------------------------------------------
+// Statistics
+// --------------------------------------------------------
     std::uint32_t gatv2_calls   = 0;
     std::uint32_t gatv2_ok      = 0;
     std::uint32_t max_depth_seen = 0;
@@ -73,9 +71,9 @@ inline void RunGATv2OverTree(
     {
         Frame& current = stack[depth];
 
-        // ====================================================
-        // GATv2 dla aktualnego węzła
-        // ====================================================
+  // ====================================================
+// GATv2 for the current node
+// ====================================================
         if (depth >= 1)
         {
             const int num_ancestors =
@@ -124,9 +122,9 @@ inline void RunGATv2OverTree(
                 max_depth_seen = static_cast<std::uint32_t>(depth);
         }
 
-        // ====================================================
-        // Przejdź do dziecka / wróć
-        // ====================================================
+   // ====================================================
+// Go to child / go back
+// ====================================================
         const std::uint16_t childCount =
             St.tree.ChildCount(current.nodeIndex);
 
@@ -174,9 +172,9 @@ inline void RunGATv2OverTree(
         --depth;
     }
 
-    // --------------------------------------------------------
-    // Statystyki końcowe
-    // --------------------------------------------------------
+  // --------------------------------------------------------
+// Final statistics
+// --------------------------------------------------------
     const double total_ms = total_ns / 1.0e6;
     const double per_call_us =
         (gatv2_calls > 0)
@@ -190,7 +188,7 @@ inline void RunGATv2OverTree(
         << ", total: " << total_ms << " ms"
         << ", avg/call: " << per_call_us << " us\n";
 
-    // Ekstrapolacja na 800 000 węzłów.
+  // Extrapolation to 800,000 nodes.
     if (gatv2_calls > 0)
     {
         const double per_call_ms = total_ms / gatv2_calls;
