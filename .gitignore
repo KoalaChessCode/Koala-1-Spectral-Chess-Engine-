@@ -1,0 +1,10 @@
+# Pliki kompilacji
+build/
+
+# Pliki wygenerowane (FFT, Modele)
+weights/*.bin
+weights/*.sgat
+
+# Ewentualne pliki tymczasowe
+*.o
+*.a

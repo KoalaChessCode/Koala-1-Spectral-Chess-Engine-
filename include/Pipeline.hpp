@@ -108,6 +108,8 @@ void AllBlackLegalMoves(C& Bmoves,int& Bcount,A& Inst, B& PawnMem) {
     Bmoves.Count = static_cast<U8>(Bcount);
 }
 
+
+
 template<
     typename TrState,
     typename PawnTables

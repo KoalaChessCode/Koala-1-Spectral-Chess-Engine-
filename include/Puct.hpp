@@ -209,17 +209,17 @@ struct Tree
 };
 
 
-//800000<---for 256MB
-//2000000<--for 2GB
 struct TreeStateWrapper
 {
     Arena memory;
     Tree<Board> tree;
 
-    TreeStateWrapper(std::size_t treeSize = 800000)
-        :
-        memory(),
-        tree(memory, treeSize)
+    TreeStateWrapper(
+        std::size_t treeSize = 100,
+        std::size_t arenaSize = 1 * 1024 * 1024   // ← NEW
+    )
+        : memory(arenaSize),
+          tree(memory, treeSize)
     {
     }
 };

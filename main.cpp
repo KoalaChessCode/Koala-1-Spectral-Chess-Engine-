@@ -5,11 +5,12 @@
 #include "Listener.hpp"
 #include "Helpers.hpp"
 #include "FEN.hpp"
+#include "GATv2WrapperDFS.hpp"
+#include "GATv2Kernels.hpp"
 
-alignas(64) static unsigned char EmbeddedFftBlob[] = {
-    #embed "fft_32x8x8.bin"
+alignas(64)  unsigned char EmbeddedFftBlob[] = {
+    #embed "weights/fft_32x8x8.bin"
 };
-
 
 void debug(const TreeStateWrapper&, const FFTWorking&){
     std::cerr << "[SIZE] Node<Board>: "
@@ -32,6 +33,7 @@ void debug(const TreeStateWrapper&, const FFTWorking&){
     std::cerr << "[SIZE] Node<Board>: "
           << sizeof(Node<Board>) << " B\n";
 
+
 }
 int main(void)
 {
@@ -40,10 +42,49 @@ int main(void)
     TreeStateWrapper Tree;
     alignas(64) FFTWorking WorkingFFT{};
     InitSpectrum(EmbeddedFftBlob, WorkingFFT);
+    alignas(64) FFTWorking rootFFT;
+    std::memcpy(&rootFFT, &WorkingFFT, sizeof(FFTWorking));
+
 
     debug(Tree,WorkingFFT);
    
-      
+
+
+
+    
+    Arena gatv2Arena(2 * 1024 * 1024);    
+
+    if (!Context.allocate(gatv2Arena))
+    {
+        std::cerr << "[INIT] PipelineContext allocation failed\n";
+        return 1;
+    }
+
+    // GATv2 network + workspace
+    auto gatv2Net = std::make_unique<DefaultGATv2Network>();
+    if (!InitDefaultGATv2(*gatv2Net))
+    {
+        std::cerr << "[INIT] GATv2 init failed\n";
+        return 1;
+    }
+
+    auto gatv2Ws = std::make_unique<DefaultGATv2Workspace>();
+    if (!InitDefaultGATv2Workspace(*gatv2Ws))
+    {
+        std::cerr << "[INIT] GATv2 workspace init failed\n";
+        return 1;
+    }
+
+    Context.gatv2 = gatv2Net.get();
+    Context.gatv2_workspace = gatv2Ws.get();
+
+
+    std::cerr << "[INIT] fft_working_history: "
+          << Context.fft_working_history << '\n';
+std::cerr << "[INIT] fft_interleaved: "
+          << Context.fft_interleaved << '\n';
+
+
 
     uci::Listener listener;
 
@@ -63,7 +104,7 @@ int main(void)
 
     listener.addListener(
         uci::event::POSITION,
-        [&Tree, &WorkingFFT,&Context,&PawnMemorandum](uci::arguments_t args) {
+        [&Tree, &WorkingFFT,&rootFFT,&Context,&PawnMemorandum](uci::arguments_t args) {
             auto it = args.find("fen");
 
             if (it != args.end())
@@ -128,6 +169,23 @@ int main(void)
           << " / "
           << Tree.tree.capacity
           << '\n';
+
+        std::cerr << "[UCI] BEFORE GATv2\n";
+
+        auto t0 = std::chrono::high_resolution_clock::now();
+
+        RunGATv2OverTree(
+    Tree,
+    Context,
+    rootFFT
+);
+
+        auto t1 = std::chrono::high_resolution_clock::now();
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+    t1 - t0
+).count();
+
+std::cerr << "[UCI] AFTER GATv2: " << ms << " ms\n";
 
         }
     );

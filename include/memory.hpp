@@ -1,17 +1,15 @@
-#pragma once 
+#pragma once
 #include <memory>
-
 
 struct Arena
 {
-    static constexpr std::size_t SIZE = 256 * 1024 * 1024;//256MB
-    //static constexpr std::size_t SIZE = 2ULL * 1024 * 1024 * 1024; // 2 GiB
-
+    std::size_t size = 0;               // ← NEW
     std::unique_ptr<std::byte[]> arena;
     std::size_t offset = 0;
 
-    Arena()
-        : arena(std::make_unique<std::byte[]>(SIZE))
+    explicit Arena(std::size_t size_ = 256 * 1024 * 1024)   // ← NEW
+        : size(size_),
+          arena(std::make_unique<std::byte[]>(size_))
     {
     }
 
@@ -23,14 +21,11 @@ struct Arena
         const std::size_t aligned =
             (offset + alignment - 1) & ~(alignment - 1);
 
-        if (aligned + sizeof(T) > SIZE)
+        if (aligned + sizeof(T) > size)   // ← size, nie SIZE
             return nullptr;
 
-        T* ptr =
-            reinterpret_cast<T*>(arena.get() + aligned);
-
+        T* ptr = reinterpret_cast<T*>(arena.get() + aligned);
         offset = aligned + sizeof(T);
-
         return ptr;
     }
 
@@ -42,17 +37,13 @@ struct Arena
         const std::size_t aligned =
             (offset + alignment - 1) & ~(alignment - 1);
 
-        const std::size_t bytes =
-            sizeof(T) * count;
+        const std::size_t bytes = sizeof(T) * count;
 
-        if (aligned + bytes > SIZE)
+        if (aligned + bytes > size)   // ← size, nie SIZE
             return nullptr;
 
-        T* ptr =
-            reinterpret_cast<T*>(arena.get() + aligned);
-
+        T* ptr = reinterpret_cast<T*>(arena.get() + aligned);
         offset = aligned + bytes;
-
         return ptr;
     }
 };
