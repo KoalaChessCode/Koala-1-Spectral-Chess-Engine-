@@ -5,7 +5,7 @@
 #include "Listener.hpp"
 #include "Helpers.hpp"
 #include "FEN.hpp"
-#include "GATv2WrapperDFS.hpp"
+#include "GATv2Wrapper.hpp"
 #include "GATv2Kernels.hpp"
 
 alignas(64)  unsigned char EmbeddedFftBlob[] = {
@@ -169,24 +169,6 @@ std::cerr << "[INIT] fft_interleaved: "
           << " / "
           << Tree.tree.capacity
           << '\n';
-
-        std::cerr << "[UCI] BEFORE GATv2\n";
-
-        auto t0 = std::chrono::high_resolution_clock::now();
-
-        RunGATv2OverTree(
-    Tree,
-    Context,
-    rootFFT
-);
-
-        auto t1 = std::chrono::high_resolution_clock::now();
-        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-    t1 - t0
-).count();
-
-std::cerr << "[UCI] AFTER GATv2: " << ms << " ms\n";
-
         }
     );
 

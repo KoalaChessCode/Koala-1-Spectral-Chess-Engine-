@@ -2,6 +2,7 @@
 #include "MoveGen.hpp"
 #include "Legal.hpp"
 #include "Tree.hpp"
+#include "GATv2Wrapper.hpp"
 
 // ===========================================================================
 // SAVE DELTA DURING EXPANSION
@@ -123,6 +124,19 @@ void RunPipeline(
     FFTWorking& workingFFT
 )
 {
+
+std::memcpy(
+    &ctx.fft_working_history[0],
+    &workingFFT,
+    sizeof(FFTWorking)
+);
+
+InterleaveFFT(
+    &workingFFT.real[0][0][0],
+    &workingFFT.imag[0][0][0],
+    ctx.fft_interleaved
+);
+
     Node<Board>& node =
         St.tree.At(nodeIndex);
 
@@ -454,75 +468,57 @@ if (!current.expanded)
             ++depth;
 
 
-            if (depth >= MaxDepth)
+                if (depth >= MaxDepth)
             {
                 // Cofnij FFT.
                 RemoveFftDelta(
                     workingFFT,
-                    St.tree
-                        .At(childIndex)
-                        .fftDelta
+                    St.tree.At(childIndex).fftDelta
                 );
 
-
-               
+                // Cofnij ruch na planszy.
                 if (current.whiteToMove)
                 {
-                    UnmakeMove<true>(
-                        InstanceOne,
-                        move,
-                        undo
-                    );
+                    UnmakeMove<true>(InstanceOne, move, undo);
                 }
                 else
                 {
-                    UnmakeMove<false>(
-                        InstanceOne,
-                        move,
-                        undo
-                    );
+                    UnmakeMove<false>(InstanceOne, move, undo);
                 }
 
-
                 --depth;
-
                 continue;
             }
 
+            // =================================================
+            // OCENA GATv2 (dla tego konkretnego dziecka)
+            // =================================================
+            EvaluateSingleNodeGAT(St, ctx, childIndex, depth, workingFFT);
 
             // =================================================
-            // INIT CHILD CURSOR
+            // INIT CHILD CURSOR (dla DFS)
             // =================================================
+            stack[depth].nodeIndex = childIndex;
+            stack[depth].firstChild = 0;
+            stack[depth].childCount = 0;
+            stack[depth].nextChild = 0;
+            stack[depth].whiteToMove = !current.whiteToMove;
+            stack[depth].expanded = false;
+            stack[depth].hasUndo = true;
+            stack[depth].undo = undo;
 
-            stack[depth].nodeIndex =
-                childIndex;
+            // =================================================
+            // PUCT GONI DFS (Z opóźnieniem)
+            // =================================================
+            constexpr int MIN_THINK_DEPTH = 2; 
+            if (depth >= MIN_THINK_DEPTH) {
+                RunPUCT(St, ctx.puct_states, 10, 1.0f, 1.0f, childIndex); 
+            }
 
-            stack[depth].firstChild =
-                0;
-
-            stack[depth].childCount =
-                0;
-
-            stack[depth].nextChild =
-                0;
-
-            stack[depth].whiteToMove =
-                !current.whiteToMove;
-
-            stack[depth].expanded =
-                false;
-
-            stack[depth].hasUndo =
-                true;
-
-            stack[depth].undo =
-                undo;
-
-
-            continue;
+            continue; // <-- To continue zamyka blok if (current.nextChild < current.childCount)
         }
 
-
+    
         // ====================================================
         // ROOT
         // ====================================================

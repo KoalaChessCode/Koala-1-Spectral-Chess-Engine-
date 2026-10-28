@@ -254,7 +254,8 @@ inline uint32_t RunPUCT(
     PuctState* states,
     int iterations = 800,
     float c_puct = 1.0f,
-    float beta = 1.0f
+    float beta = 1.0f,
+    uint32_t start_node = 0 // <-- NOWY PARAMETR
 ) {
     if (states == nullptr || iterations < 0)
         return std::numeric_limits<uint32_t>::max();
@@ -263,34 +264,18 @@ inline uint32_t RunPUCT(
         return std::numeric_limits<uint32_t>::max();
 
     for (int iter = 0; iter < iterations; ++iter) {
-        uint32_t current = 0;
+        uint32_t current = start_node; // <-- START Z PODANEGO WĘZŁA
 
         while (St.tree.ChildCount(current) > 0) {
             const uint32_t next = select_bayes_puct_child(
-                current,
-                states,
-                c_puct,
-                beta,
-                St.tree
+                current, states, c_puct, beta, St.tree
             );
-
-        
-            if (next == current)
-                break;
-
+            if (next == current) break;
             current = next;
         }
 
-      
         const float leaf_value = states[current].mu_0;
-
-     
-        backpropagate_bayes(
-            current,
-            leaf_value,
-            states,
-            St.tree
-        );
+        backpropagate_bayes(current, leaf_value, states, St.tree);
     }
 
 
