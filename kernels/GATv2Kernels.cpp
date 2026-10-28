@@ -25,8 +25,6 @@
 //   [0]    = h_src
 //   [1..N] = neighbor_out
 //
-// Wagi są wgrywane raz.
-// Per wywołanie: 1 transfer H->D, 1 kernel, 1 transfer D->H.
 // ============================================================
 
 struct GATv2GpuContext
@@ -174,24 +172,23 @@ static bool copy_device_to_host(
     ) == 0;
 }
 
-// ============================================================
+// =============================================================
 // SIMT projection kernel
 //
-// Każdy zespół GPU oblicza jeden wynik:
+// Each GPU thread computes one result:
 //
-//   Y[n][hd] = sum_k W[row][k] * X[n][k]
+// Y[n][hd] = sum_k W[row][k] * X[n][k]
 //
-// row = hd       dla node
-// row = HD + hd  dla neighbor
+// row = hd for the node
+// row = HD + hd for the neighbor
 //
-// Różnica względem poprzedniej wersji:
-//   - teams distribute przydziela wyniki zespołom GPU;
-//   - parallel for rozdziela redukcję po K między wątki zespołu;
-//   - reduction(+:sum) scala sumy cząstkowe.
+// Differences compared to other versions:
+// - tasks distribute assigned results among GPU threads;
+// - parallelization across the K dimension among task projections;
+// - reduction(+:sum) aggregates partial sums.
 //
-// To jest wariant eksperymentalny do benchmarku na gfx803.
-// ============================================================
-
+// This is an experimental variant for benchmarking on gfx803.
+// =============================================================
 
 template<int K>
 static bool project_both_device(
@@ -416,7 +413,7 @@ GATv2GpuContext* gatv2_gpu_create(
         return nullptr;
     }
 
-    // ---- Sklej W_src i W_tgt w jeden bufor ----
+   // ---- Concatenate W_src and W_tgt into a single buffer ----
     std::unique_ptr<float[]> staging;
 
     try
@@ -430,7 +427,7 @@ GATv2GpuContext* gatv2_gpu_create(
         return nullptr;
     }
 
-    // W_src: pierwsze HD wierszy.
+ // W_src: the first HD rows.
     for (int m = 0; m < H; ++m)
     {
         std::memcpy(
@@ -441,7 +438,7 @@ GATv2GpuContext* gatv2_gpu_create(
         );
     }
 
-    // W_tgt: kolejne HD wierszy.
+  // W_tgt: successive HD rows.
     for (int m = 0; m < H; ++m)
     {
         std::memcpy(
@@ -511,7 +508,7 @@ int gatv2_gpu_run(
     const std::size_t total =
         static_cast<std::size_t>(N) + 1;
 
-    // ---- 1. Zbierz node i neighbors w staging ----
+   // ---- 1. Collect the node and its neighbors into staging ----
     float* h_X = ctx->h_X_staging.get();
 
     std::memcpy(
@@ -531,7 +528,7 @@ int gatv2_gpu_run(
         );
     }
 
-    // ---- 2. Jeden transfer host -> device ----
+   // ---- 2. One transfer host -> device ----
     const std::size_t input_count =
         total * static_cast<std::size_t>(K);
 
@@ -548,7 +545,7 @@ int gatv2_gpu_run(
         return 0;
     }
 
-    // ---- 3. Kooperacyjny kernel SIMT ----
+  // ---- 3. Cooperative SIMT kernel ----
     bool ok = false;
 
 if (ctx->K == 4096)
@@ -569,7 +566,7 @@ else if (ctx->K == 512)
 if (!ok)
     return 0;
 
-    // ---- 4. Jeden transfer device -> host ----
+  // ---- 4. One transfer device -> host ----
     const std::size_t output_count =
         total * static_cast<std::size_t>(HD);
 
@@ -588,7 +585,7 @@ if (!ok)
         return 0;
     }
 
-    // ---- 5. Rozdziel wyniki ----
+   // ---- 5. Separate the results ----
     std::memcpy(
         h_src,
         h_Y,

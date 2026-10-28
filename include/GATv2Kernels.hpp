@@ -9,12 +9,12 @@ extern "C" {
 struct GATv2GpuContext;
 
 // ============================================================
-// create: przyjmuje TABLICĘ wskaźników per głowa.
+// create: takes an ARRAY of per-head pointers.
 //
-//   W_heads_src[m] -> blok [D][K] (HIDDEN_DIM × K floatów)
-//   W_heads_tgt[m] -> blok [D][K]
+//   W_heads_src[m] -> block [D][K] (HIDDEN_DIM × K floats)
+//   W_heads_tgt[m] -> block [D][K]
 //
-// create() SKLEJA w jeden ciągły bufor [H][D][K] na GPU.
+// create() CONCATENATES these into a single contiguous buffer [H][D][K] on the GPU.
 // ============================================================
 
 GATv2GpuContext* gatv2_gpu_create(
@@ -48,10 +48,9 @@ void gatv2_gpu_destroy(
     GATv2GpuContext* ctx
 ) noexcept;
 
-
-// Zwraca liczbę GPU widzianych przez runtime Clang/LLVM 17.
-// Kompilowane Clangiem — używa libomp+libomptarget LLVM 17,
-// a NIE libgomp GCC (który nie zna gfx803).
+// Returns the number of GPUs visible to the Clang/LLVM 17 runtime.
+// Compiled with Clang — uses LLVM 17's libomp+libomptarget,
+// NOT GCC's libgomp (which does not recognize gfx803).
 int gatv2_gpu_available() noexcept;
 
 #ifdef __cplusplus
