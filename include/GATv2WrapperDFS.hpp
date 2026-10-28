@@ -1,7 +1,7 @@
 #pragma once
 #include <iostream>
 #include <chrono>
-
+#include "BayesPUCT.hpp"
 //===========================================================================
 // GATv2 over tree
 // ===========================================================================
@@ -108,6 +108,71 @@ inline void RunGATv2OverTree(
                 embedding,
                 *ctx.gatv2_workspace
             );
+
+
+         
+
+            if (ok) {
+                constexpr std::size_t EMBED_DIM =
+                DefaultGATv2Config::EMBED_DIM;
+                float* current_emb =
+                ctx.gatv2_embeddings
+                + static_cast<std::size_t>(current.nodeIndex) * EMBED_DIM;
+
+        std::memcpy(
+        current_emb,
+        embedding,
+        EMBED_DIM * sizeof(float)
+    );
+
+            float sum = 0.0f;
+
+            for (std::size_t i = 0; i < EMBED_DIM; ++i)
+            sum += current_emb[i];
+
+            const float gat_value =
+            std::tanh(sum / static_cast<float>(EMBED_DIM));
+
+            float policy_prior = 1.0f;
+
+     if (depth >= 1) {
+        const uint32_t parent_idx =
+            St.tree.parentIndex[current.nodeIndex];
+
+        const float* parent_emb =
+            ctx.gatv2_embeddings
+            + static_cast<std::size_t>(parent_idx) * EMBED_DIM;
+
+        float dot = 0.0f;
+        float norm_parent = 0.0f;
+        float norm_current = 0.0f;
+
+        for (std::size_t i = 0; i < EMBED_DIM; ++i) {
+            const float p = parent_emb[i];
+            const float c = current_emb[i];
+
+            dot += p * c;
+            norm_parent += p * p;
+            norm_current += c * c;
+        }
+
+        constexpr float EPSILON = 1.0e-8f;
+
+        const float denominator =
+            std::sqrt(norm_parent) * std::sqrt(norm_current);
+
+        const float cos_sim =
+            dot / (denominator + EPSILON);
+
+        policy_prior = std::exp(cos_sim);
+    }
+
+    init_puct_state(
+        ctx.puct_states[current.nodeIndex],
+        gat_value,
+        policy_prior
+    );
+}
 
             auto t1 = std::chrono::high_resolution_clock::now();
 

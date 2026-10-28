@@ -1,7 +1,7 @@
 #include "Constants.hpp"
 #include "MoveGen.hpp"
 #include "Legal.hpp"
-#include "Puct.hpp"
+#include "Tree.hpp"
 
 // ===========================================================================
 // SAVE DELTA DURING EXPANSION

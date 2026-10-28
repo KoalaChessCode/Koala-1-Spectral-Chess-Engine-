@@ -7,10 +7,14 @@
 #include "GATv2.hpp"
 #include "Delta.hpp"
 #include "memory.hpp"
+#include "Tree.hpp"
 
 
 struct PipelineContext 
 {
+    static constexpr std::size_t TREE_SIZE = 100;
+    PuctState* puct_states = nullptr;
+    float* gatv2_embeddings = nullptr;
     static constexpr int HISTORY_K = 32;
     std::atomic<bool> guard{true};
 
@@ -32,19 +36,41 @@ struct PipelineContext
         return guard.load(std::memory_order_relaxed);
     }
 
-    template<typename ArenaType>
+   template<typename ArenaType>
     bool allocate(ArenaType& arena)
-    {
-        fft_working_history = arena.template allocate<FFTWorking>(HISTORY_K);
-        if (!fft_working_history) return false;
+{
+   
+    puct_states = arena.template allocate<PuctState>(TREE_SIZE);
+    if (!puct_states) return false;
 
-        fft_interleaved = arena.template allocate<float>(
-            static_cast<std::size_t>(HISTORY_K) * FFT_FLOATS
-        );
-        if (!fft_interleaved) return false;
+   
+    gatv2_embeddings = arena.template allocate<float>(
+        TREE_SIZE * DefaultGATv2Config::EMBED_DIM
+    );
+    if (!gatv2_embeddings) return false;
 
-        return true;
-    }
 
+    fft_working_history =
+        arena.template allocate<FFTWorking>(HISTORY_K);
+    if (!fft_working_history) return false;
+
+    fft_interleaved = arena.template allocate<float>(
+        static_cast<std::size_t>(HISTORY_K) * FFT_FLOATS
+    );
+    if (!fft_interleaved) return false;
+
+
+    for (std::size_t i = 0; i < TREE_SIZE; ++i)
+        std::construct_at(&puct_states[i]);
+
+
+    std::fill_n(
+        gatv2_embeddings,
+        TREE_SIZE * DefaultGATv2Config::EMBED_DIM,
+        0.0f
+    );
+
+    return true;
+}
 
 };

@@ -1,4 +1,4 @@
-#include "Puct.hpp"
+#include "Tree.hpp"
 #include "Thread.hpp"
 #include "Pipeline.hpp"
 #include "events.hpp"

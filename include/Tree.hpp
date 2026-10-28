@@ -224,12 +224,3 @@ struct TreeStateWrapper
     }
 };
 
-struct PUCT{
-    float Score;
-    float value;
-    int visits;
-    float prior;
-
-};
-
-
