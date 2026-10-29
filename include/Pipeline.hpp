@@ -124,7 +124,6 @@ void RunPipeline(
     FFTWorking& workingFFT
 )
 {
-
 std::memcpy(
     &ctx.fft_working_history[0],
     &workingFFT,
@@ -588,5 +587,4 @@ if (!current.expanded)
         --depth;
     }
 
-    ReportGATv2Stats(ctx, true);
 }

@@ -1,4 +1,7 @@
 #pragma once
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
 #include <iostream>
 #include <chrono>
 #include <iomanip>
@@ -11,12 +14,16 @@ inline void ReportGATv2Stats(PipelineContext& ctx, bool force = false) {
     const auto now = Clock::now();
     const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
         now.time_since_epoch()).count();
-    auto last_ns = ctx.gatv2_last_report_ns.load(std::memory_order_relaxed);
-    if (!force && last_ns != 0 && now_ns - last_ns < 350'000'000)
-        return;
-    if (!ctx.gatv2_last_report_ns.compare_exchange_strong(
-            last_ns, now_ns, std::memory_order_relaxed))
-        return;
+    if (force) {
+        ctx.gatv2_last_report_ns.store(now_ns, std::memory_order_relaxed);
+    } else {
+        auto last_ns = ctx.gatv2_last_report_ns.load(std::memory_order_relaxed);
+        if (last_ns != 0 && now_ns - last_ns < 350'000'000)
+            return;
+        if (!ctx.gatv2_last_report_ns.compare_exchange_strong(
+                last_ns, now_ns, std::memory_order_relaxed))
+            return;
+    }
 
     const auto calls = ctx.gatv2_calls.load(std::memory_order_relaxed);
     const auto ok = ctx.gatv2_ok.load(std::memory_order_relaxed);
@@ -113,21 +120,68 @@ inline void EvaluateSingleNodeGAT(
         for (int k = 0; k < DefaultGATv2Config::EMBED_DIM; ++k) sum += current_emb[k];
         float gat_value = std::tanh(sum / DefaultGATv2Config::EMBED_DIM);
 
-        // 4. Calculating the prior (cosine to parent)
+       
+        // 4. Prior from cosine similarity to parent
         float policy_prior = 1.0f;
+
         if (depth >= 1) {
             const uint32_t parent_idx = St.tree.parentIndex[childIndex];
-            const float* parent_emb = ctx.gatv2_embeddings + parent_idx * DefaultGATv2Config::EMBED_DIM;
-            float dot = 0.0f, norm_p = 0.0f, norm_c = 0.0f;
-            for (int k = 0; k < DefaultGATv2Config::EMBED_DIM; ++k) {
-                dot += parent_emb[k] * current_emb[k];
-                norm_p += parent_emb[k] * parent_emb[k];
-                norm_c += current_emb[k] * current_emb[k];
+
+            // Nie odczytuj embeddingu spoza drzewa.
+            if (parent_idx >= St.tree.size) {
+                return;
             }
-            policy_prior = std::exp(dot / (std::sqrt(norm_p) * std::sqrt(norm_c) + 1e-8f));
+
+            const float* parent_emb =
+                ctx.gatv2_embeddings +
+                static_cast<std::size_t>(parent_idx) *
+                    DefaultGATv2Config::EMBED_DIM;
+
+            float dot = 0.0f;
+            float norm_p_sq = 0.0f;
+            float norm_c_sq = 0.0f;
+
+            for (int k = 0; k < DefaultGATv2Config::EMBED_DIM; ++k) {
+                const float p = parent_emb[k];
+                const float c = current_emb[k];
+
+                if (!std::isfinite(p) || !std::isfinite(c))
+                    return;
+
+                dot       += p * c;
+                norm_p_sq += p * p;
+                norm_c_sq += c * c;
+            }
+
+            constexpr float EPS = 1.0e-8f;
+            constexpr float TEMPERATURE = 1.0f; // baseline
+
+            if (!std::isfinite(dot) ||
+                !std::isfinite(norm_p_sq) ||
+                !std::isfinite(norm_c_sq) ||
+                norm_p_sq <= EPS ||
+                norm_c_sq <= EPS) {
+                return;
+            }
+
+            float cosine =
+                dot / (std::sqrt(norm_p_sq) * std::sqrt(norm_c_sq));
+
+            if (!std::isfinite(cosine))
+                return;
+
+            cosine = std::clamp(cosine, -1.0f, 1.0f);
+
+            policy_prior =
+                std::exp((cosine - 1.0f) / TEMPERATURE);
         }
 
-       // 5. PUCT initialization
-        init_puct_state(ctx.puct_states[childIndex], gat_value, policy_prior);
+        // 5. Existing Bayesian PUCT initialization — unchanged.
+        init_puct_state(
+            ctx.puct_states[childIndex],
+            gat_value,
+            policy_prior
+        );
+
     }
 }

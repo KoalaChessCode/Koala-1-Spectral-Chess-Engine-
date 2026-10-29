@@ -162,6 +162,8 @@ std::cerr << "[INIT] fft_interleaved: "
                 Context,
                 WorkingFFT
             );
+            ReportGATv2Stats(Context, true);
+            std::cerr << "[GATv2] finished\n";
             std::cerr << "[UCI] AFTER PIPELINE\n";
 
             std::cerr << "[TREE] Nodes used: "
