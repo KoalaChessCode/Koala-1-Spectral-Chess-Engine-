@@ -3,7 +3,10 @@
 #include <atomic>
 #include <cstdint>
 #include <cstddef>
+#include <chrono>
 
+
+#include "BayesPUCT.hpp"
 #include "GATv2.hpp"
 #include "Delta.hpp"
 #include "memory.hpp"
@@ -17,6 +20,11 @@ struct PipelineContext
     float* gatv2_embeddings = nullptr;
     static constexpr int HISTORY_K = 32;
     std::atomic<bool> guard{true};
+    std::atomic<std::uint64_t> gatv2_calls{0};
+    std::atomic<std::uint64_t> gatv2_ok{0};
+    std::atomic<int> max_depth_seen{0};
+    std::atomic<std::uint64_t> total_ns{0};
+    std::atomic<std::int64_t> gatv2_last_report_ns{0};
 
     DefaultGATv2Network*   gatv2           = nullptr;
     DefaultGATv2Workspace* gatv2_workspace = nullptr;

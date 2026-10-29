@@ -587,4 +587,6 @@ if (!current.expanded)
 
         --depth;
     }
+
+    ReportGATv2Stats(ctx, true);
 }
