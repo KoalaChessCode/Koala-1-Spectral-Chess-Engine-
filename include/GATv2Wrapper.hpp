@@ -69,17 +69,38 @@ inline void EvaluateSingleNodeGAT(
     alignas(64) float embedding[DefaultGATv2Config::EMBED_DIM];
 
     ctx.gatv2_calls.fetch_add(1, std::memory_order_relaxed);
+
+
     int max_depth = ctx.max_depth_seen.load(std::memory_order_relaxed);
+
+
     while (depth > max_depth &&
            !ctx.max_depth_seen.compare_exchange_weak(
                max_depth, depth, std::memory_order_relaxed)) {}
+
+               
+
     const auto forward_start = std::chrono::steady_clock::now();
+
+
+
     const bool forward_ok = ctx.gatv2->forward(
         node_fft, neighbors, num_ancestors, embedding, *ctx.gatv2_workspace);
+
+
+
     const auto forward_end = std::chrono::steady_clock::now();
+
+
+
+
     ctx.total_ns.fetch_add(static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             forward_end - forward_start).count()), std::memory_order_relaxed);
+
+
+
+
     if (forward_ok)
         ctx.gatv2_ok.fetch_add(1, std::memory_order_relaxed);
     ReportGATv2Stats(ctx);
