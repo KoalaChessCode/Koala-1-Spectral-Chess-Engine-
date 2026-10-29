@@ -51,6 +51,13 @@ inline void EvaluateSingleNodeGAT(
     int depth,
     const FFTWorking& workingFFT
 ) {
+    if (childIndex >= PipelineContext::TREE_SIZE || ctx.puct_ready == nullptr)
+        return;
+    {
+        std::lock_guard<std::mutex> lock(ctx.puct_mutex);
+        ctx.puct_ready[childIndex] = false;
+    }
+
  // 1. Synchronizing FFT to a circular buffer
     const int node_slot = depth % PipelineContext::HISTORY_K;
     std::memcpy(&ctx.fft_working_history[node_slot], &workingFFT, sizeof(FFTWorking));
@@ -113,6 +120,11 @@ inline void EvaluateSingleNodeGAT(
     ReportGATv2Stats(ctx);
 
     if (forward_ok) {
+        for (int k = 0; k < DefaultGATv2Config::EMBED_DIM; ++k) {
+            if (!std::isfinite(embedding[k]))
+                return;
+        }
+
         float* current_emb = ctx.gatv2_embeddings + childIndex * DefaultGATv2Config::EMBED_DIM;
         std::memcpy(current_emb, embedding, DefaultGATv2Config::EMBED_DIM * sizeof(float));
 
@@ -158,30 +170,45 @@ inline void EvaluateSingleNodeGAT(
 
             if (!std::isfinite(dot) ||
                 !std::isfinite(norm_p_sq) ||
-                !std::isfinite(norm_c_sq) ||
-                norm_p_sq <= EPS ||
-                norm_c_sq <= EPS) {
+                !std::isfinite(norm_c_sq)) {
                 return;
             }
 
-            float cosine =
-                dot / (std::sqrt(norm_p_sq) * std::sqrt(norm_c_sq));
+            if (norm_p_sq > EPS && norm_c_sq > EPS) {
+                float cosine =
+                    dot / (std::sqrt(norm_p_sq) * std::sqrt(norm_c_sq));
 
-            if (!std::isfinite(cosine))
-                return;
+                if (!std::isfinite(cosine))
+                    return;
 
-            cosine = std::clamp(cosine, -1.0f, 1.0f);
+                cosine = std::clamp(cosine, -1.0f, 1.0f);
 
-            policy_prior =
-                std::exp((cosine - 1.0f) / TEMPERATURE);
+                policy_prior =
+                    std::exp((cosine - 1.0f) / TEMPERATURE);
+            }
         }
 
         // 5. Existing Bayesian PUCT initialization — unchanged.
-        init_puct_state(
-            ctx.puct_states[childIndex],
-            gat_value,
-            policy_prior
-        );
+        {
+            std::lock_guard<std::mutex> lock(ctx.puct_mutex);
+            init_puct_state(
+                ctx.puct_states[childIndex],
+                gat_value,
+                policy_prior
+            );
+            ctx.puct_ready[childIndex] = true;
+
+            if (childIndex != 0 &&
+                ctx.puct_queue_count < PipelineContext::TREE_SIZE) {
+                const std::size_t tail =
+                    (ctx.puct_queue_head + ctx.puct_queue_count) %
+                    PipelineContext::TREE_SIZE;
+                ctx.puct_ready_queue[tail] = childIndex;
+                ++ctx.puct_queue_count;
+            }
+        }
+        if (childIndex != 0)
+            ctx.puct_cv.notify_one();
 
     }
 }

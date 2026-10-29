@@ -105,7 +105,8 @@ inline uint32_t select_bayes_puct_child(
     PuctState* states,
     float c_puct,
     float beta,
-    const Tree<Board>& tree
+    const Tree<Board>& tree,
+    const bool* ready = nullptr
 ) noexcept {
     const uint32_t begin = tree.childBegin[node_idx];
     const uint16_t count = tree.childCount[node_idx];
@@ -123,9 +124,15 @@ inline uint32_t select_bayes_puct_child(
     beta = std::max(0.0f, beta);
 
     float prior_sum = 0.0f;
+    uint16_t ready_count = 0;
 
     for (uint16_t i = 0; i < count; ++i) {
-        const float p = states[begin + i].prior;
+        const uint32_t child_idx = begin + i;
+        if (ready && !ready[child_idx])
+            continue;
+        ++ready_count;
+
+        const float p = states[child_idx].prior;
 
         if (std::isfinite(p) && p > 0.0f)
             prior_sum += p;
@@ -135,11 +142,16 @@ inline uint32_t select_bayes_puct_child(
         !std::isfinite(prior_sum) ||
         prior_sum <= PUCT_EPSILON;
 
-    uint32_t best_child = begin;
+    if (ready_count == 0)
+        return node_idx;
+
+    uint32_t best_child = std::numeric_limits<uint32_t>::max();
     float best_score = -std::numeric_limits<float>::infinity();
 
     for (uint16_t i = 0; i < count; ++i) {
         const uint32_t child_idx = begin + i;
+        if (ready && !ready[child_idx])
+            continue;
         const PuctState& child = states[child_idx];
 
         const float precision = std::max(
@@ -158,7 +170,7 @@ inline uint32_t select_bayes_puct_child(
         float P = 0.0f;
 
         if (uniform_priors) {
-            P = 1.0f / static_cast<float>(count);
+            P = 1.0f / static_cast<float>(ready_count);
         } else if (std::isfinite(child.prior) &&
                    child.prior > 0.0f) {
             P = child.prior / prior_sum;
@@ -177,7 +189,9 @@ inline uint32_t select_bayes_puct_child(
         }
     }
 
-    return best_child;
+    return best_child == std::numeric_limits<uint32_t>::max()
+        ? node_idx
+        : best_child;
 }
 
 // ============================================================
@@ -218,7 +232,8 @@ inline void backpropagate_bayes(
 
 inline uint32_t select_best_root_child(
     const Tree<Board>& tree,
-    const PuctState* states
+    const PuctState* states,
+    const bool* ready = nullptr
 ) noexcept {
     const uint32_t begin = tree.childBegin[0];
     const uint16_t count = tree.childCount[0];
@@ -226,10 +241,17 @@ inline uint32_t select_best_root_child(
     if (count == 0)
         return std::numeric_limits<uint32_t>::max();
 
-    uint32_t best_child = begin;
+    uint32_t best_child = std::numeric_limits<uint32_t>::max();
 
-    for (uint16_t i = 1; i < count; ++i) {
+    for (uint16_t i = 0; i < count; ++i) {
         const uint32_t candidate = begin + i;
+        if (ready && !ready[candidate])
+            continue;
+
+        if (best_child == std::numeric_limits<uint32_t>::max()) {
+            best_child = candidate;
+            continue;
+        }
 
         const PuctState& a = states[candidate];
         const PuctState& b = states[best_child];
@@ -255,7 +277,8 @@ inline uint32_t RunPUCT(
     int iterations = 800,
     float c_puct = 1.0f,
     float beta = 1.0f,
-    uint32_t start_node = 0 // <-- NOWY PARAMETR
+    uint32_t start_node = 0,
+    const bool* ready = nullptr
 ) {
     if (states == nullptr || iterations < 0)
         return std::numeric_limits<uint32_t>::max();
@@ -263,12 +286,29 @@ inline uint32_t RunPUCT(
     if (St.tree.childCount[0] == 0)
         return std::numeric_limits<uint32_t>::max();
 
+    if (ready && (start_node >= St.tree.size || !ready[start_node]))
+        return std::numeric_limits<uint32_t>::max();
+
+    if (ready) {
+        bool has_ready_root_child = false;
+        const uint32_t begin = St.tree.childBegin[0];
+        const uint16_t count = St.tree.childCount[0];
+        for (uint16_t i = 0; i < count; ++i) {
+            if (ready[begin + i]) {
+                has_ready_root_child = true;
+                break;
+            }
+        }
+        if (!has_ready_root_child)
+            return std::numeric_limits<uint32_t>::max();
+    }
+
     for (int iter = 0; iter < iterations; ++iter) {
         uint32_t current = start_node; // <-- START Z PODANEGO WĘZŁA
 
         while (St.tree.ChildCount(current) > 0) {
             const uint32_t next = select_bayes_puct_child(
-                current, states, c_puct, beta, St.tree
+                current, states, c_puct, beta, St.tree, ready
             );
             if (next == current) break;
             current = next;
@@ -280,7 +320,7 @@ inline uint32_t RunPUCT(
 
 
     const uint32_t best_move =
-        select_best_root_child(St.tree, states);
+        select_best_root_child(St.tree, states, ready);
 
 
     return best_move;

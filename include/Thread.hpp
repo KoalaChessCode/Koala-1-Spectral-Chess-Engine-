@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <cstddef>
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
 
 
 #include "BayesPUCT.hpp"
@@ -17,6 +19,8 @@ struct PipelineContext
 {
     static constexpr std::size_t TREE_SIZE = 100;
     PuctState* puct_states = nullptr;
+    bool* puct_ready = nullptr;
+    std::uint32_t* puct_ready_queue = nullptr;
     float* gatv2_embeddings = nullptr;
     static constexpr int HISTORY_K = 32;
     std::atomic<bool> guard{true};
@@ -25,6 +29,11 @@ struct PipelineContext
     std::atomic<int> max_depth_seen{0};
     std::atomic<std::uint64_t> total_ns{0};
     std::atomic<std::int64_t> gatv2_last_report_ns{0};
+    std::mutex puct_mutex;
+    std::condition_variable puct_cv;
+    std::size_t puct_queue_head = 0;
+    std::size_t puct_queue_count = 0;
+    bool puct_done = false;
 
     DefaultGATv2Network*   gatv2           = nullptr;
     DefaultGATv2Workspace* gatv2_workspace = nullptr;
@@ -51,6 +60,12 @@ struct PipelineContext
     puct_states = arena.template allocate<PuctState>(TREE_SIZE);
     if (!puct_states) return false;
 
+    puct_ready = arena.template allocate<bool>(TREE_SIZE);
+    if (!puct_ready) return false;
+
+    puct_ready_queue = arena.template allocate<std::uint32_t>(TREE_SIZE);
+    if (!puct_ready_queue) return false;
+
    
     gatv2_embeddings = arena.template allocate<float>(
         TREE_SIZE * DefaultGATv2Config::EMBED_DIM
@@ -70,6 +85,8 @@ struct PipelineContext
 
     for (std::size_t i = 0; i < TREE_SIZE; ++i)
         std::construct_at(&puct_states[i]);
+
+    std::fill_n(puct_ready, TREE_SIZE, false);
 
 
     std::fill_n(

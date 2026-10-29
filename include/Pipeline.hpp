@@ -3,6 +3,7 @@
 #include "Legal.hpp"
 #include "Tree.hpp"
 #include "GATv2Wrapper.hpp"
+#include <thread>
 
 // ===========================================================================
 // SAVE DELTA DURING EXPANSION
@@ -110,6 +111,33 @@ void AllBlackLegalMoves(C& Bmoves,int& Bcount,A& Inst, B& PawnMem) {
 }
 
 
+inline void RunDelayedPUCTWorker(
+    TreeStateWrapper& St,
+    PipelineContext& ctx
+)
+{
+    for (;;) {
+        std::unique_lock<std::mutex> lock(ctx.puct_mutex);
+        ctx.puct_cv.wait(lock, [&] {
+            return ctx.puct_queue_count != 0 || ctx.puct_done;
+        });
+
+        if (ctx.puct_queue_count == 0 && ctx.puct_done)
+            return;
+
+        const std::uint32_t ready_node =
+            ctx.puct_ready_queue[ctx.puct_queue_head];
+        ctx.puct_queue_head =
+            (ctx.puct_queue_head + 1) % PipelineContext::TREE_SIZE;
+        --ctx.puct_queue_count;
+
+        if (ready_node < St.tree.size && ctx.puct_ready[ready_node] &&
+            ctx.puct_ready[0] && St.tree.childCount[0] != 0)
+            RunPUCT(St, ctx.puct_states, 10, 1.0f, 1.0f, 0, ctx.puct_ready);
+    }
+}
+
+
 
 template<
     typename TrState,
@@ -135,6 +163,19 @@ InterleaveFFT(
     &workingFFT.imag[0][0][0],
     ctx.fft_interleaved
 );
+
+    std::fill_n(ctx.puct_ready, PipelineContext::TREE_SIZE, false);
+    {
+        std::lock_guard<std::mutex> lock(ctx.puct_mutex);
+        ctx.puct_queue_head = 0;
+        ctx.puct_queue_count = 0;
+        ctx.puct_done = false;
+    }
+    EvaluateSingleNodeGAT(St, ctx, nodeIndex, 0, workingFFT);
+
+    std::thread puctWorker([&] {
+        RunDelayedPUCTWorker(St, ctx);
+    });
 
     Node<Board>& node =
         St.tree.At(nodeIndex);
@@ -243,8 +284,9 @@ if (!current.expanded)
         }
         else
         {
-            current.firstChild =
-                St.tree.CreateChildren(
+            {
+                std::lock_guard<std::mutex> lock(ctx.puct_mutex);
+                current.firstChild = St.tree.CreateChildren(
                     current.nodeIndex,
                     static_cast<
                         std::uint16_t
@@ -252,6 +294,7 @@ if (!current.expanded)
                         InstanceOne.WhiteCount
                     )
                 );
+            }
 
 
             if (
@@ -259,45 +302,17 @@ if (!current.expanded)
                 UINT32_MAX
             )
             {
-                return;
+                current.childCount = 0;
             }
+            else {
+                current.childCount = static_cast<std::uint16_t>(InstanceOne.WhiteCount);
 
-
-            current.childCount =
-                static_cast<
-                    std::uint16_t
-                >(
-                    InstanceOne.WhiteCount
-                );
-
-
-            // =========================================
-            // CREATE CHILDREN
-            // =========================================
-
-            for (
-                std::uint16_t i = 0;
-                i < current.childCount;
-                ++i
-            )
-            {
-                const std::uint32_t childIndex =
-                    current.firstChild + i;
-
-
-                const Move move =
-                    InstanceOne
-                        .WhiteMoves
-                        .WhiteMoves[i];
-
-
-                StoreChildWithFftDelta<true>(
-                    St.tree,
-                    current.nodeIndex,
-                    childIndex,
-                    InstanceOne,
-                    move
-                );
+                for (std::uint16_t i = 0; i < current.childCount; ++i) {
+                    const std::uint32_t childIndex = current.firstChild + i;
+                    const Move move = InstanceOne.WhiteMoves.WhiteMoves[i];
+                    StoreChildWithFftDelta<true>(
+                        St.tree, current.nodeIndex, childIndex, InstanceOne, move);
+                }
             }
         }
     }
@@ -335,8 +350,9 @@ if (!current.expanded)
         }
         else
         {
-            current.firstChild =
-                St.tree.CreateChildren(
+            {
+                std::lock_guard<std::mutex> lock(ctx.puct_mutex);
+                current.firstChild = St.tree.CreateChildren(
                     current.nodeIndex,
                     static_cast<
                         std::uint16_t
@@ -344,6 +360,7 @@ if (!current.expanded)
                         InstanceOne.BlackCount
                     )
                 );
+            }
 
 
             if (
@@ -351,45 +368,17 @@ if (!current.expanded)
                 UINT32_MAX
             )
             {
-                return;
+                current.childCount = 0;
             }
+            else {
+                current.childCount = static_cast<std::uint16_t>(InstanceOne.BlackCount);
 
-
-            current.childCount =
-                static_cast<
-                    std::uint16_t
-                >(
-                    InstanceOne.BlackCount
-                );
-
-
-            // =========================================
-            // CREATE CHILDREN
-            // =========================================
-
-            for (
-                std::uint16_t i = 0;
-                i < current.childCount;
-                ++i
-            )
-            {
-                const std::uint32_t childIndex =
-                    current.firstChild + i;
-
-
-                const Move move =
-                    InstanceOne
-                        .BlackMoves
-                        .BlackMoves[i];
-
-
-                StoreChildWithFftDelta<false>(
-                    St.tree,
-                    current.nodeIndex,
-                    childIndex,
-                    InstanceOne,
-                    move
-                );
+                for (std::uint16_t i = 0; i < current.childCount; ++i) {
+                    const std::uint32_t childIndex = current.firstChild + i;
+                    const Move move = InstanceOne.BlackMoves.BlackMoves[i];
+                    StoreChildWithFftDelta<false>(
+                        St.tree, current.nodeIndex, childIndex, InstanceOne, move);
+                }
             }
         }
     }
@@ -506,14 +495,6 @@ if (!current.expanded)
             stack[depth].hasUndo = true;
             stack[depth].undo = undo;
 
-            // =================================================
-            // PUCT GONI DFS (Z opóźnieniem)
-            // =================================================
-            constexpr int MIN_THINK_DEPTH = 2; 
-            if (depth >= MIN_THINK_DEPTH) {
-                RunPUCT(St, ctx.puct_states, 10, 1.0f, 1.0f, childIndex); 
-            }
-
             continue; // <-- To continue zamyka blok if (current.nextChild < current.childCount)
         }
 
@@ -586,5 +567,12 @@ if (!current.expanded)
 
         --depth;
     }
+
+    {
+        std::lock_guard<std::mutex> lock(ctx.puct_mutex);
+        ctx.puct_done = true;
+    }
+    ctx.puct_cv.notify_all();
+    puctWorker.join();
 
 }
