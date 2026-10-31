@@ -17,7 +17,7 @@
 
 struct PipelineContext 
 {
-    static constexpr std::size_t TREE_SIZE = 100;
+    static constexpr std::size_t TREE_SIZE = 300;
     PuctState* puct_states = nullptr;
     bool* puct_ready = nullptr;
     std::uint32_t* puct_ready_queue = nullptr;
@@ -40,6 +40,7 @@ struct PipelineContext
 
     FFTWorking* fft_working_history = nullptr;   // [HISTORY_K] // [32] = 512 KiB
     float*      fft_interleaved     = nullptr;   // [HISTORY_K][FFT_FLOATS]// // [32][4096] = 512 KiB
+    std::uint32_t* fft_history_nodes = nullptr;
 
     inline void Stop() noexcept {
         guard.store(false, std::memory_order_relaxed);
@@ -82,11 +83,15 @@ struct PipelineContext
     );
     if (!fft_interleaved) return false;
 
+    fft_history_nodes = arena.template allocate<std::uint32_t>(HISTORY_K);
+    if (!fft_history_nodes) return false;
+
 
     for (std::size_t i = 0; i < TREE_SIZE; ++i)
         std::construct_at(&puct_states[i]);
 
     std::fill_n(puct_ready, TREE_SIZE, false);
+    std::fill_n(fft_history_nodes, HISTORY_K, UINT32_MAX);
 
 
     std::fill_n(

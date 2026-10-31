@@ -42,8 +42,40 @@ inline void ReportGATv2Stats(PipelineContext& ctx, bool force = false) {
 }
 
 // ============================================================
-// EVALUATION OF A SINGLE NODE (without DFS loop)
+// GATv2 receives only the node representation and verified neighbors.
 // ============================================================
+inline bool EvaluateGATv2(
+    PipelineContext& ctx,
+    const float* node_fft,
+    const float* const neighbors[],
+    int num_neighbors,
+    float* embedding
+) {
+    if (!ctx.gatv2 || !ctx.gatv2_workspace || !node_fft || !embedding)
+        return false;
+
+    ctx.gatv2_calls.fetch_add(1, std::memory_order_relaxed);
+    const auto forward_start = std::chrono::steady_clock::now();
+    const bool forward_ok = ctx.gatv2->forward(
+        node_fft, neighbors, num_neighbors, embedding, *ctx.gatv2_workspace);
+    const auto forward_end = std::chrono::steady_clock::now();
+    ctx.total_ns.fetch_add(static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            forward_end - forward_start).count()), std::memory_order_relaxed);
+
+    if (forward_ok)
+        ctx.gatv2_ok.fetch_add(1, std::memory_order_relaxed);
+    ReportGATv2Stats(ctx);
+
+    if (!forward_ok)
+        return false;
+    for (int k = 0; k < DefaultGATv2Config::EMBED_DIM; ++k)
+        if (!std::isfinite(embedding[k]))
+            return false;
+    return true;
+}
+
+// Prepare search-local FFT history and commit the model result to this node.
 inline void EvaluateSingleNodeGAT(
     TreeStateWrapper& St,
     PipelineContext& ctx,
@@ -51,14 +83,15 @@ inline void EvaluateSingleNodeGAT(
     int depth,
     const FFTWorking& workingFFT
 ) {
-    if (childIndex >= PipelineContext::TREE_SIZE || ctx.puct_ready == nullptr)
+    if (childIndex >= PipelineContext::TREE_SIZE ||
+        childIndex >= St.tree.size || ctx.puct_ready == nullptr)
         return;
     {
         std::lock_guard<std::mutex> lock(ctx.puct_mutex);
         ctx.puct_ready[childIndex] = false;
     }
 
- // 1. Synchronizing FFT to a circular buffer
+    // Synchronize this node's actual FFT into its depth slot.
     const int node_slot = depth % PipelineContext::HISTORY_K;
     std::memcpy(&ctx.fft_working_history[node_slot], &workingFFT, sizeof(FFTWorking));
     InterleaveFFT(
@@ -66,64 +99,31 @@ inline void EvaluateSingleNodeGAT(
         &ctx.fft_working_history[node_slot].imag[0][0][0], 
         ctx.fft_interleaved + node_slot * FFT_FLOATS
     );
+    ctx.fft_history_nodes[node_slot] = childIndex;
 
     const float* node_fft = ctx.fft_interleaved + node_slot * FFT_FLOATS;
 
-    // 2. Retrieving neighbors' history (HISTORY_K)
-    const int num_ancestors = (depth < PipelineContext::HISTORY_K) ? depth : PipelineContext::HISTORY_K - 1;
+    // Include only ring entries that match this node's actual ancestors.
     const float* neighbors[PipelineContext::HISTORY_K - 1];
-    
-    for (int j = 0; j < num_ancestors; ++j) {
+    int num_ancestors = 0;
+    std::uint32_t ancestor = childIndex == 0
+        ? 0 : St.tree.parentIndex[childIndex];
+    for (int j = 0; j < depth && j < PipelineContext::HISTORY_K - 1; ++j) {
         const int ancestor_depth = depth - 1 - j;
         const int slot = ancestor_depth % PipelineContext::HISTORY_K;
-        neighbors[j] = ctx.fft_interleaved + slot * FFT_FLOATS;
+        if (ancestor >= St.tree.size)
+            break;
+        if (ctx.fft_history_nodes[slot] == ancestor)
+            neighbors[num_ancestors++] = ctx.fft_interleaved + slot * FFT_FLOATS;
+        ancestor = St.tree.parentIndex[ancestor];
     }
 
-    // 3. Evaluation via GATv2
     alignas(64) float embedding[DefaultGATv2Config::EMBED_DIM];
-
-    ctx.gatv2_calls.fetch_add(1, std::memory_order_relaxed);
-
-
     int max_depth = ctx.max_depth_seen.load(std::memory_order_relaxed);
-
-
     while (depth > max_depth &&
            !ctx.max_depth_seen.compare_exchange_weak(
                max_depth, depth, std::memory_order_relaxed)) {}
-
-               
-
-    const auto forward_start = std::chrono::steady_clock::now();
-
-
-
-    const bool forward_ok = ctx.gatv2->forward(
-        node_fft, neighbors, num_ancestors, embedding, *ctx.gatv2_workspace);
-
-
-
-    const auto forward_end = std::chrono::steady_clock::now();
-
-
-
-
-    ctx.total_ns.fetch_add(static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            forward_end - forward_start).count()), std::memory_order_relaxed);
-
-
-
-
-    if (forward_ok)
-        ctx.gatv2_ok.fetch_add(1, std::memory_order_relaxed);
-    ReportGATv2Stats(ctx);
-
-    if (forward_ok) {
-        for (int k = 0; k < DefaultGATv2Config::EMBED_DIM; ++k) {
-            if (!std::isfinite(embedding[k]))
-                return;
-        }
+    if (EvaluateGATv2(ctx, node_fft, neighbors, num_ancestors, embedding)) {
 
         float* current_emb = ctx.gatv2_embeddings + childIndex * DefaultGATv2Config::EMBED_DIM;
         std::memcpy(current_emb, embedding, DefaultGATv2Config::EMBED_DIM * sizeof(float));

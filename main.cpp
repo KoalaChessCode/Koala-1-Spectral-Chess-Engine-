@@ -7,6 +7,9 @@
 #include "FEN.hpp"
 #include "GATv2Wrapper.hpp"
 #include "GATv2Kernels.hpp"
+#include <algorithm>
+#include <cstdint>
+#include <string>
 
 GameState CURRENT_POSITION{Board{}};
 
@@ -89,6 +92,7 @@ std::cerr << "[INIT] fft_interleaved: "
 
 
     uci::Listener listener;
+    bool whiteToMove = true;
 
     listener.addListener(
         uci::event::UCI,
@@ -106,13 +110,8 @@ std::cerr << "[INIT] fft_interleaved: "
 
     listener.addListener(
         uci::event::POSITION,
-        [&Tree, &WorkingFFT,&rootFFT,&Context,&PawnMemorandum](uci::arguments_t args) {
-            CURRENT_POSITION = GameState(Tree.tree.nodes[0].position);
+        [&Tree, &WorkingFFT, &rootFFT, &whiteToMove](uci::arguments_t args) {
             auto it = args.find("fen");
-
-            if (it == args.end())
-                std::cerr << "[FEN] Using startpos\n";
-
             if (it != args.end())
             {
                 const std::string_view fenString = it->second;
@@ -121,6 +120,8 @@ std::cerr << "[INIT] fft_interleaved: "
                 {
                     const auto parsedPosition =
                         FENUtility::ParseFEN(fenString);
+
+                    whiteToMove = parsedPosition.whiteToMove;
 
                     if (FENUtility::IsInitialPosition(fenString))
                     {
@@ -161,8 +162,9 @@ std::cerr << "[INIT] fft_interleaved: "
                         parsedPosition.enPassantSquare >= 0
                         ? BB(1) << parsedPosition.enPassantSquare
                         : 0;
+
                     CURRENT_POSITION = GameState(
-                        Tree.tree.nodes[0].position,
+                        parsedPosition.board,
                         castlingRights,
                         enPassantTarget
                     );
@@ -174,26 +176,53 @@ std::cerr << "[INIT] fft_interleaved: "
                     std::cerr << "[FEN ERROR] " << e.what() << '\n';
                 }
             }
+            else if (args.contains("startpos")) {
+                try {
+                    const auto parsedPosition = FENUtility::ParseFEN(INITIAL_FEN);
+                    whiteToMove = parsedPosition.whiteToMove;
+                    CURRENT_POSITION = GameState(parsedPosition.board);
+                    std::memcpy(&WorkingFFT, &rootFFT, sizeof(FFTWorking));
+                } catch (const std::exception& e) {
+                    std::cerr << "[FEN ERROR] " << e.what() << '\n';
+                }
+            }
+            Tree.tree.nodes[0].position = CURRENT_POSITION.board;
+        }
+    );
 
-            std::cerr << "[UCI] BEFORE PIPELINE\n";
+    listener.addListener(
+        uci::event::GO,
+        [&Tree, &WorkingFFT, &Context, &PawnMemorandum, &whiteToMove]
+        (uci::arguments_t args) {
+            const auto readTime = [&args](const char* key) -> std::int64_t {
+                const auto it = args.find(key);
+                if (it == args.end()) return 0;
+                try {
+                    return std::max<std::int64_t>(0, std::stoll(it->second));
+                } catch (...) {
+                    return 0;
+                }
+            };
+            const std::int64_t white_time = readTime("wtime");
+            const std::int64_t black_time = readTime("btime");
+            const std::int64_t white_inc = readTime("winc");
+            const std::int64_t black_inc = readTime("binc");
+            const std::int64_t moves_to_go = readTime("movestogo");
+            const std::int64_t remaining = whiteToMove ? white_time : black_time;
+            const std::int64_t increment = whiteToMove ? white_inc : black_inc;
+            const SearchTimeLimits limits = MakeSearchTimeLimits(
+                remaining, increment, moves_to_go);
 
-            RunPipeline(
-                Tree,
-                0,
-                PawnMemorandum,
-                true,
-                Context,
-                WorkingFFT
-            );
+            std::cerr << "[UCI go] wtime=" << white_time
+                      << " btime=" << black_time
+                      << " winc=" << white_inc
+                      << " binc=" << black_inc
+                      << " movestogo=" << moves_to_go
+                      << " side=" << (whiteToMove ? "white" : "black") << '\n';
+            Tree.tree.nodes[0].position = CURRENT_POSITION.board;
+            RunPipeline(Tree, 0, PawnMemorandum, whiteToMove,
+                        Context, WorkingFFT, limits);
             ReportGATv2Stats(Context, true);
-            std::cerr << "[GATv2] finished\n";
-            std::cerr << "[UCI] AFTER PIPELINE\n";
-
-            std::cerr << "[TREE] Nodes used: "
-          << Tree.tree.size
-          << " / "
-          << Tree.tree.capacity
-          << '\n';
         }
     );
 
