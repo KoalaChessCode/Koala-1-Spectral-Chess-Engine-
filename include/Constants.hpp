@@ -149,8 +149,6 @@ struct Board
     }
 };
 
-
-
 struct PawnData
 {
     BB move_one;
@@ -319,6 +317,8 @@ struct GameState
     {
     }
 };
+
+extern GameState CURRENT_POSITION;
 
 inline BB ReverseBits(BB x)
 {

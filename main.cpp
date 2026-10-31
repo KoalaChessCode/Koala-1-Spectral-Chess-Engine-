@@ -8,6 +8,8 @@
 #include "GATv2Wrapper.hpp"
 #include "GATv2Kernels.hpp"
 
+GameState CURRENT_POSITION{Board{}};
+
 alignas(64)  unsigned char EmbeddedFftBlob[] = {
     #embed "weights/fft_32x8x8.bin"
 };
@@ -105,7 +107,11 @@ std::cerr << "[INIT] fft_interleaved: "
     listener.addListener(
         uci::event::POSITION,
         [&Tree, &WorkingFFT,&rootFFT,&Context,&PawnMemorandum](uci::arguments_t args) {
+            CURRENT_POSITION = GameState(Tree.tree.nodes[0].position);
             auto it = args.find("fen");
+
+            if (it == args.end())
+                std::cerr << "[FEN] Using startpos\n";
 
             if (it != args.end())
             {
@@ -113,6 +119,9 @@ std::cerr << "[INIT] fft_interleaved: "
 
                 try
                 {
+                    const auto parsedPosition =
+                        FENUtility::ParseFEN(fenString);
+
                     if (FENUtility::IsInitialPosition(fenString))
                     {
                         // ========================================
@@ -120,7 +129,6 @@ std::cerr << "[INIT] fft_interleaved: "
                         // Skip irregular script (already initialized).
                         // ========================================
                         std::cerr << "[FEN] Using initial position\n";
-
                     }
                     else
                     {
@@ -138,18 +146,33 @@ std::cerr << "[INIT] fft_interleaved: "
 
                         std::cerr << "[FEN] Custom position loaded\n";
                     }
+
+                    U8 castlingRights = 0;
+                    if (parsedPosition.whiteKingSideCastle)
+                        castlingRights |= WHITE_KINGSIDE_RIGHT;
+                    if (parsedPosition.whiteQueenSideCastle)
+                        castlingRights |= WHITE_QUEENSIDE_RIGHT;
+                    if (parsedPosition.blackKingSideCastle)
+                        castlingRights |= BLACK_KINGSIDE_RIGHT;
+                    if (parsedPosition.blackQueenSideCastle)
+                        castlingRights |= BLACK_QUEENSIDE_RIGHT;
+
+                    const BB enPassantTarget =
+                        parsedPosition.enPassantSquare >= 0
+                        ? BB(1) << parsedPosition.enPassantSquare
+                        : 0;
+                    CURRENT_POSITION = GameState(
+                        Tree.tree.nodes[0].position,
+                        castlingRights,
+                        enPassantTarget
+                    );
+                     
                 }
+               
                 catch (const std::exception& e)
                 {
                     std::cerr << "[FEN ERROR] " << e.what() << '\n';
                 }
-            }
-            else
-            {
-                // ================================================
-                // No FEN provided: use default startpos.
-                // ================================================
-                std::cerr << "[FEN] Using startpos\n";
             }
 
             std::cerr << "[UCI] BEFORE PIPELINE\n";
