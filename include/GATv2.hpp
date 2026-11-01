@@ -890,6 +890,12 @@ bool forward(
                 head_output[d] += alpha * projected[d];
             }
         }
+        //a parameter optimilisation
+        constexpr float SELF_LOOP_LAMBDA = 0.10f;
+        for (int d = 0; d < HIDDEN_DIM; ++d)
+        {
+            head_output[d] += SELF_LOOP_LAMBDA * h_src[d];
+        }
     }
 
     return true;
