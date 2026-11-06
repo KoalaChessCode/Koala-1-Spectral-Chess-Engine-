@@ -194,11 +194,17 @@ inline void RunDelayedPUCTWorker(
 
 
 
+struct PipelineResult
+{
+    Move bestMove{};
+    bool hasMove = false;
+};
+
 template<
     typename TrState,
     typename PawnTables
 >
-void RunPipeline(
+PipelineResult RunPipeline(
     TrState& St,
     std::uint32_t nodeIndex,
     const PawnTables& pawnTable,
@@ -713,7 +719,7 @@ if (!current.expanded)
         const auto square = [](std::uint8_t sq) {
             std::string out;
             out += static_cast<char>('a' + sq % 8);
-            out += static_cast<char>('1' + sq / 8);
+            out += static_cast<char>('8' - sq / 8);
             return out;
         };
         best_uci = square(bestMove.From) + square(bestMove.To);
@@ -735,4 +741,5 @@ if (!current.expanded)
     std::cout << "bestmove " << (best_child == UINT32_MAX ? "0000" : best_uci)
               << '\n' << std::flush;
 
+    return {bestMove, best_child != UINT32_MAX};
 }

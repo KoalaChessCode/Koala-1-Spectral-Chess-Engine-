@@ -9,7 +9,10 @@
 #include "GATv2Kernels.hpp"
 #include <algorithm>
 #include <cstdint>
+#include <sstream>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 
 GameState CURRENT_POSITION{Board{}};
 
@@ -40,6 +43,130 @@ void debug(const TreeStateWrapper&, const FFTWorking&){
 
 
 }
+
+inline int ParseUciSquare(std::string_view square)
+{
+    if (square.size() != 2 || square[0] < 'a' || square[0] > 'h' ||
+        square[1] < '1' || square[1] > '8')
+        return -1;
+    return ('8' - square[1]) * 8 + (square[0] - 'a');
+}
+
+inline bool MatchesUciMove(const Move& move, std::string_view uciMove)
+{
+    if (uciMove.size() != 4 && uciMove.size() != 5)
+        return false;
+    if (ParseUciSquare(uciMove.substr(0, 2)) != move.From ||
+        ParseUciSquare(uciMove.substr(2, 2)) != move.To)
+        return false;
+
+    if (!IsPromotion(move.Flags))
+        return uciMove.size() == 4;
+
+    if (uciMove.size() != 5)
+        return false;
+    constexpr std::string_view promotionLetters = "qrbn";
+    const std::size_t promotion = (move.Flags - PROMO_QUEEN_QUIET) & 3u;
+    return uciMove[4] == promotionLetters[promotion];
+}
+
+template<bool White>
+inline Move ResolveUciMoveForSide(
+    GameState& state,
+    std::string_view uciMove,
+    const PawnTables& pawnTables
+)
+{
+    if constexpr (White) {
+        MoveListWhite moves{};
+        int count = 0;
+        AllWhiteLegalMoves(moves, count, state, pawnTables);
+        for (int i = 0; i < count; ++i)
+            if (MatchesUciMove(moves.WhiteMoves[i], uciMove))
+                return moves.WhiteMoves[i];
+    } else {
+        MoveListBlack moves{};
+        int count = 0;
+        AllBlackLegalMoves(moves, count, state, pawnTables);
+        for (int i = 0; i < count; ++i)
+            if (MatchesUciMove(moves.BlackMoves[i], uciMove))
+                return moves.BlackMoves[i];
+    }
+
+    throw std::invalid_argument("Illegal or unrecognized UCI move");
+}
+
+inline Move ResolveUciMove(
+    GameState& state,
+    bool whiteToMove,
+    std::string_view uciMove,
+    const PawnTables& pawnTables
+)
+{
+    return whiteToMove
+        ? ResolveUciMoveForSide<true>(state, uciMove, pawnTables)
+        : ResolveUciMoveForSide<false>(state, uciMove, pawnTables);
+}
+
+template<bool White>
+inline void ApplyGameMoveForSide(
+    GameState& state,
+    FFTWorking& workingFFT,
+    const Move& move,
+    bool& whiteToMove,
+    unsigned& halfmoveClock,
+    unsigned& fullmoveNumber
+)
+{
+    const Board before = state.board;
+    const BB from = BB(1) << move.From;
+    const BB to = BB(1) << move.To;
+    const bool pawnMove = ((White ? WhitePawns(before) : BlackPawns(before)) & from) != 0;
+    const bool capture = (state.Occupancy & to) != 0 || move.Flags == EN_PASSANT;
+
+    MakeMove<White>(state, move);
+    ApplyFftDelta(workingFFT, MakeFftDelta<4>(before, state.board));
+
+    halfmoveClock = (pawnMove || capture) ? 0 : halfmoveClock + 1;
+    if constexpr (!White)
+        ++fullmoveNumber;
+    whiteToMove = !whiteToMove;
+}
+
+inline void ApplyGameMove(
+    GameState& state,
+    FFTWorking& workingFFT,
+    const Move& move,
+    bool& whiteToMove,
+    unsigned& halfmoveClock,
+    unsigned& fullmoveNumber
+)
+{
+    if (whiteToMove)
+        ApplyGameMoveForSide<true>(state, workingFFT, move, whiteToMove,
+                                   halfmoveClock, fullmoveNumber);
+    else
+        ApplyGameMoveForSide<false>(state, workingFFT, move, whiteToMove,
+                                    halfmoveClock, fullmoveNumber);
+}
+
+struct EngineIdentity
+{
+    bool known = false;
+    bool white = true;
+
+    void Reset() noexcept { known = false; }
+
+    bool ObserveFirstTurn(bool whiteToMove) noexcept
+    {
+        if (known)
+            return false;
+        known = true;
+        white = whiteToMove;
+        return true;
+    }
+};
+
 int main(void)
 {
     PipelineContext Context;
@@ -93,6 +220,9 @@ std::cerr << "[INIT] fft_interleaved: "
 
     uci::Listener listener;
     bool whiteToMove = true;
+    unsigned halfmoveClock = 0;
+    unsigned fullmoveNumber = 1;
+    EngineIdentity engineIdentity;
 
     listener.addListener(
         uci::event::UCI,
@@ -109,44 +239,31 @@ std::cerr << "[INIT] fft_interleaved: "
     );
 
     listener.addListener(
+        uci::event::UCINEWGAME,
+        [&engineIdentity](uci::arguments_t) {
+            engineIdentity.Reset();
+        }
+    );
+
+    listener.addListener(
         uci::event::POSITION,
-        [&Tree, &WorkingFFT, &rootFFT, &whiteToMove](uci::arguments_t args) {
-            auto it = args.find("fen");
-            if (it != args.end())
-            {
-                const std::string_view fenString = it->second;
+        [&Tree, &WorkingFFT, &rootFFT, &whiteToMove, &halfmoveClock,
+         &fullmoveNumber, &PawnMemorandum](uci::arguments_t args) {
+            try {
+                GameState nextPosition{Board{}};
+                alignas(64) FFTWorking nextFFT{};
+                std::memcpy(&nextFFT, &rootFFT, sizeof(FFTWorking));
+                bool nextWhiteToMove = true;
+                unsigned nextHalfmoveClock = 0;
+                unsigned nextFullmoveNumber = 1;
 
-                try
-                {
-                    const auto parsedPosition =
-                        FENUtility::ParseFEN(fenString);
-
-                    whiteToMove = parsedPosition.whiteToMove;
-
-                    if (FENUtility::IsInitialPosition(fenString))
-                    {
-                        // ========================================
-                        // Initial position detected.
-                        // Skip irregular script (already initialized).
-                        // ========================================
-                        std::cerr << "[FEN] Using initial position\n";
-                    }
-                    else
-                    {
-                        // ========================================
-                        // Non-standard position detected.
-                        // Apply delta-based FFT transformation.
-                        // ========================================
-                        std::cerr << "[FEN] Loading custom position: "
-                                  << fenString << '\n';
-                        FENUtility::IrregularScript(
-                            Tree,
-                            WorkingFFT,
-                            fenString
-                        );
-
-                        std::cerr << "[FEN] Custom position loaded\n";
-                    }
+                const auto fenIt = args.find("fen");
+                if (fenIt != args.end()) {
+                    const std::string_view fenString = fenIt->second;
+                    const auto parsedPosition = FENUtility::ParseFEN(fenString);
+                    nextWhiteToMove = parsedPosition.whiteToMove;
+                    nextHalfmoveClock = parsedPosition.halfmoveClock;
+                    nextFullmoveNumber = parsedPosition.fullmoveNumber;
 
                     U8 castlingRights = 0;
                     if (parsedPosition.whiteKingSideCastle)
@@ -157,42 +274,56 @@ std::cerr << "[INIT] fft_interleaved: "
                         castlingRights |= BLACK_KINGSIDE_RIGHT;
                     if (parsedPosition.blackQueenSideCastle)
                         castlingRights |= BLACK_QUEENSIDE_RIGHT;
+                    const BB enPassantTarget = parsedPosition.enPassantSquare >= 0
+                        ? BB(1) << parsedPosition.enPassantSquare : 0;
+                    nextPosition = GameState(parsedPosition.board, castlingRights,
+                                             enPassantTarget);
 
-                    const BB enPassantTarget =
-                        parsedPosition.enPassantSquare >= 0
-                        ? BB(1) << parsedPosition.enPassantSquare
-                        : 0;
-
-                    CURRENT_POSITION = GameState(
-                        parsedPosition.board,
-                        castlingRights,
-                        enPassantTarget
-                    );
-                     
-                }
-               
-                catch (const std::exception& e)
-                {
-                    std::cerr << "[FEN ERROR] " << e.what() << '\n';
-                }
-            }
-            else if (args.contains("startpos")) {
-                try {
+                    if (FENUtility::IsInitialPosition(fenString)) {
+                        std::cerr << "[FEN] Using initial position\n";
+                    } else {
+                        std::cerr << "[FEN] Loading custom position: "
+                                  << fenString << '\n';
+                        FENUtility::IrregularScript(Tree, nextFFT, fenString);
+                        std::cerr << "[FEN] Custom position loaded\n";
+                    }
+                } else if (args.contains("startpos")) {
                     const auto parsedPosition = FENUtility::ParseFEN(INITIAL_FEN);
-                    whiteToMove = parsedPosition.whiteToMove;
-                    CURRENT_POSITION = GameState(parsedPosition.board);
-                    std::memcpy(&WorkingFFT, &rootFFT, sizeof(FFTWorking));
-                } catch (const std::exception& e) {
-                    std::cerr << "[FEN ERROR] " << e.what() << '\n';
+                    nextPosition = GameState(parsedPosition.board);
+                    nextWhiteToMove = parsedPosition.whiteToMove;
+                } else {
+                    return;
                 }
+
+                const auto movesIt = args.find("moves");
+                if (movesIt != args.end()) {
+                    std::istringstream moves(movesIt->second);
+                    std::string uciMove;
+                    while (moves >> uciMove) {
+                        const Move move = ResolveUciMove(
+                            nextPosition, nextWhiteToMove, uciMove, PawnMemorandum);
+                        ApplyGameMove(nextPosition, nextFFT, move,
+                                      nextWhiteToMove, nextHalfmoveClock,
+                                      nextFullmoveNumber);
+                    }
+                }
+
+                CURRENT_POSITION = nextPosition;
+                WorkingFFT = nextFFT;
+                whiteToMove = nextWhiteToMove;
+                halfmoveClock = nextHalfmoveClock;
+                fullmoveNumber = nextFullmoveNumber;
+                Tree.tree.nodes[0].position = CURRENT_POSITION.board;
+            } catch (const std::exception& e) {
+                std::cerr << "[POSITION ERROR] " << e.what() << '\n';
             }
-            Tree.tree.nodes[0].position = CURRENT_POSITION.board;
         }
     );
 
     listener.addListener(
         uci::event::GO,
-        [&Tree, &WorkingFFT, &Context, &PawnMemorandum, &whiteToMove]
+        [&Tree, &WorkingFFT, &Context, &PawnMemorandum, &whiteToMove,
+         &halfmoveClock, &fullmoveNumber, &engineIdentity]
         (uci::arguments_t args) {
             const auto readTime = [&args](const char* key) -> std::int64_t {
                 const auto it = args.find(key);
@@ -219,9 +350,17 @@ std::cerr << "[INIT] fft_interleaved: "
                       << " binc=" << black_inc
                       << " movestogo=" << moves_to_go
                       << " side=" << (whiteToMove ? "white" : "black") << '\n';
+            if (engineIdentity.ObserveFirstTurn(whiteToMove))
+                std::cerr << "[ENGINE] playing as "
+                          << (engineIdentity.white ? "white" : "black")
+                          << '\n';
             Tree.tree.nodes[0].position = CURRENT_POSITION.board;
-            RunPipeline(Tree, 0, PawnMemorandum, whiteToMove,
-                        Context, WorkingFFT, limits);
+            const PipelineResult result = RunPipeline(
+                Tree, 0, PawnMemorandum, whiteToMove,
+                Context, WorkingFFT, limits);
+            if (result.hasMove)
+                ApplyGameMove(CURRENT_POSITION, WorkingFFT, result.bestMove,
+                              whiteToMove, halfmoveClock, fullmoveNumber);
             ReportGATv2Stats(Context, true);
         }
     );

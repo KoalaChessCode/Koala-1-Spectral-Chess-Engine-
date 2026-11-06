@@ -142,37 +142,19 @@ inline FftDelta<N> MakeFftDelta(
         const BB oldPieces = parent.Pieces[channel];
         const BB newPieces = child.Pieces[channel];
 
-        if (oldPieces == newPieces)
-            continue;
-
         const float code = FFTChannelCodes[channel];
-
-        if (oldPieces != 0)
+        BB changedSquares = oldPieces ^ newPieces;
+        while (changedSquares != 0)
         {
-            const std::uint8_t oldSquare =
-                static_cast<std::uint8_t>(
-                    __builtin_ctzll(oldPieces)
-                );
-
+            const std::uint8_t square =
+                static_cast<std::uint8_t>(__builtin_ctzll(changedSquares));
+            const BB squareBit = BB(1) << square;
             delta.Add(
                 channel,
-                oldSquare,
-                -code
+                square,
+                (oldPieces & squareBit) != 0 ? -code : code
             );
-        }
-
-        if (newPieces != 0)
-        {
-            const std::uint8_t newSquare =
-                static_cast<std::uint8_t>(
-                    __builtin_ctzll(newPieces)
-                );
-
-            delta.Add(
-                channel,
-                newSquare,
-                code
-            );
+            changedSquares &= changedSquares - 1;
         }
     }
 

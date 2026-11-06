@@ -97,7 +97,7 @@ inline Board ParseBoardField(std::string_view fen)
             throw std::invalid_argument("Too many squares in FEN rank");
 
         const std::uint8_t square =
-            static_cast<std::uint8_t>(rank * 8 + file);
+            static_cast<std::uint8_t>((7 - rank) * 8 + file);
 
         const BB bit = BB(1) << square;
 
@@ -551,7 +551,7 @@ inline ParsedFEN ParseFEN(std::string_view fen)
             );
 
         result.enPassantSquare =
-            epRank * 8 + epFile;
+            (7 - epRank) * 8 + epFile;
 
         pos += 2;
     }
@@ -656,15 +656,17 @@ inline void IrregularScript(
     std::string_view customFEN
 )
 {
-    const Board& defaultStartBoard =
-        Tree.tree.At(0).position;
-
     const auto parsed =
         FENUtility::ParseFEN(customFEN);
 
+    // WorkingFFT is based on the initial-position spectrum. Keep the board
+    // side of that base explicit instead of using the transient search root.
+    const Board initialPositionBoard =
+        FENUtility::ParseFEN(INITIAL_FEN).board;
+
     const auto initialDelta =
         MakeFftDelta<64>(
-            defaultStartBoard,
+            initialPositionBoard,
             parsed.board
         );
 
