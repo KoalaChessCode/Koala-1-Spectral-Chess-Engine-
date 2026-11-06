@@ -198,6 +198,7 @@ struct PipelineResult
 {
     Move bestMove{};
     bool hasMove = false;
+    float valueForRootSide = 0.0f;
 };
 
 template<
@@ -255,7 +256,7 @@ InterleaveFFT(
         ctx.puct_queue_count = 0;
         ctx.puct_done = false;
     }
-    EvaluateSingleNodeGAT(St, ctx, nodeIndex, 0, workingFFT);
+    EvaluateSingleNodeGAT(St, ctx, nodeIndex, 0, workingFFT, whiteToMove);
 
     std::atomic<std::uint64_t> puct_elapsed_ns{0};
     std::atomic<bool> puct_did_run{false};
@@ -573,7 +574,8 @@ if (!current.expanded)
             // =================================================
             // OCENA GATv2 (dla tego konkretnego dziecka)
             // =================================================
-            EvaluateSingleNodeGAT(St, ctx, childIndex, depth, workingFFT);
+            EvaluateSingleNodeGAT(St, ctx, childIndex, depth, workingFFT,
+                                  !current.whiteToMove);
 
             // =================================================
             // INIT CHILD CURSOR (dla DFS)
@@ -741,5 +743,7 @@ if (!current.expanded)
     std::cout << "bestmove " << (best_child == UINT32_MAX ? "0000" : best_uci)
               << '\n' << std::flush;
 
-    return {bestMove, best_child != UINT32_MAX};
+    const float valueForRootSide = best_child != UINT32_MAX
+        ? -ctx.puct_states[best_child].mu_N : 0.0f;
+    return {bestMove, best_child != UINT32_MAX, valueForRootSide};
 }

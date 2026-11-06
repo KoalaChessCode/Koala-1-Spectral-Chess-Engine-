@@ -163,8 +163,10 @@ inline uint32_t select_bayes_puct_child(
         const float sigma_N = 1.0f / std::sqrt(precision);
 
 
+        // Child values are stored from the child's side-to-move perspective.
+        // Negate the mean to score the action from this parent's perspective.
         const float bayes_term =
-            child.mu_N + beta * sigma_N;
+            -child.mu_N + beta * sigma_N;
 
    
         float P = 0.0f;
@@ -257,7 +259,7 @@ inline uint32_t select_best_root_child(
         const PuctState& b = states[best_child];
 
         if (a.N > b.N ||
-            (a.N == b.N && a.mu_N > b.mu_N)) {
+            (a.N == b.N && -a.mu_N > -b.mu_N)) {
             best_child = candidate;
         }
     }

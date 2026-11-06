@@ -358,6 +358,10 @@ std::cerr << "[INIT] fft_interleaved: "
             const PipelineResult result = RunPipeline(
                 Tree, 0, PawnMemorandum, whiteToMove,
                 Context, WorkingFFT, limits);
+            const float valueForEngine =
+                engineIdentity.white == whiteToMove
+                ? result.valueForRootSide : -result.valueForRootSide;
+            std::cerr << "[ENGINE VALUE] " << valueForEngine << '\n';
             if (result.hasMove)
                 ApplyGameMove(CURRENT_POSITION, WorkingFFT, result.bestMove,
                               whiteToMove, halfmoveClock, fullmoveNumber);

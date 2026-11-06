@@ -81,7 +81,8 @@ inline void EvaluateSingleNodeGAT(
     PipelineContext& ctx,
     uint32_t childIndex,
     int depth,
-    const FFTWorking& workingFFT
+    const FFTWorking& workingFFT,
+    bool whiteToMove
 ) {
     if (childIndex >= PipelineContext::TREE_SIZE ||
         childIndex >= St.tree.size || ctx.puct_ready == nullptr)
@@ -130,7 +131,11 @@ inline void EvaluateSingleNodeGAT(
 
         float sum = 0.0f;
         for (int k = 0; k < DefaultGATv2Config::EMBED_DIM; ++k) sum += current_emb[k];
-        float gat_value = std::tanh(sum / DefaultGATv2Config::EMBED_DIM);
+        // The model score has a fixed White perspective. PUCT stores values
+        // from the perspective of the player to move at each node.
+        const float whiteValue =
+            std::tanh(sum / DefaultGATv2Config::EMBED_DIM);
+        const float gat_value = whiteToMove ? whiteValue : -whiteValue;
 
        
         // 4. Prior from cosine similarity to parent
