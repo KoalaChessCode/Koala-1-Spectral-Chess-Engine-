@@ -202,18 +202,7 @@ inline void EvaluateSingleNodeGAT(
                 policy_prior
             );
             ctx.puct_ready[childIndex] = true;
-
-            if (childIndex != 0 &&
-                ctx.puct_queue_count < PipelineContext::TREE_SIZE) {
-                const std::size_t tail =
-                    (ctx.puct_queue_head + ctx.puct_queue_count) %
-                    PipelineContext::TREE_SIZE;
-                ctx.puct_ready_queue[tail] = childIndex;
-                ++ctx.puct_queue_count;
-            }
         }
-        if (childIndex != 0)
-            ctx.puct_cv.notify_one();
 
     }
 }

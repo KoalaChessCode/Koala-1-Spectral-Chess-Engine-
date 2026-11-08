@@ -20,7 +20,6 @@ struct PipelineContext
     static constexpr std::size_t TREE_SIZE = 300;
     PuctState* puct_states = nullptr;
     bool* puct_ready = nullptr;
-    std::uint32_t* puct_ready_queue = nullptr;
     float* gatv2_embeddings = nullptr;
     static constexpr int HISTORY_K = 32;
     std::atomic<bool> guard{true};
@@ -31,9 +30,8 @@ struct PipelineContext
     std::atomic<std::int64_t> gatv2_last_report_ns{0};
     std::mutex puct_mutex;
     std::condition_variable puct_cv;
-    std::size_t puct_queue_head = 0;
-    std::size_t puct_queue_count = 0;
     bool puct_done = false;
+    int puct_iterations = 10;
 
     DefaultGATv2Network*   gatv2           = nullptr;
     DefaultGATv2Workspace* gatv2_workspace = nullptr;
@@ -63,9 +61,6 @@ struct PipelineContext
 
     puct_ready = arena.template allocate<bool>(TREE_SIZE);
     if (!puct_ready) return false;
-
-    puct_ready_queue = arena.template allocate<std::uint32_t>(TREE_SIZE);
-    if (!puct_ready_queue) return false;
 
    
     gatv2_embeddings = arena.template allocate<float>(

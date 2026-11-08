@@ -1,10 +1,15 @@
-# Pliki kompilacji
-build/
 
-# Pliki wygenerowane (FFT, Modele)
+build/
+app/
+training/
+TRAINER_INSTRUCTIONS.md
+cmake/
+
+
 weights/*.bin
 weights/*.sgat
+training_data/
 
-# Ewentualne pliki tymczasowe
+
 *.o
 *.a

@@ -6,6 +6,7 @@
 #include <thread>
 #include <chrono>
 #include <cmath>
+#include <array>
 
 struct SearchTimeLimits
 {
@@ -163,32 +164,25 @@ inline void RunDelayedPUCTWorker(
     std::atomic<bool>& puct_did_run
 )
 {
-    for (;;) {
+    {
         std::unique_lock<std::mutex> lock(ctx.puct_mutex);
-        ctx.puct_cv.wait(lock, [&] {
-            return ctx.puct_queue_count != 0 || ctx.puct_done;
-        });
+        ctx.puct_cv.wait(lock, [&] { return ctx.puct_done; });
+    }
 
-        if (ctx.puct_queue_count == 0 && ctx.puct_done)
-            return;
-
-        const std::uint32_t ready_node =
-            ctx.puct_ready_queue[ctx.puct_queue_head];
-        ctx.puct_queue_head =
-            (ctx.puct_queue_head + 1) % PipelineContext::TREE_SIZE;
-        --ctx.puct_queue_count;
-
-        if (ready_node < St.tree.size && ctx.puct_ready[ready_node] &&
-            ctx.puct_ready[0] && St.tree.childCount[0] != 0 &&
-            SearchTimeLimits::Clock::now() < hard_deadline) {
-            const auto started = SearchTimeLimits::Clock::now();
-            RunPUCT(St, ctx.puct_states, 10, 1.0f, 1.0f, 0, ctx.puct_ready);
-            puct_did_run.store(true, std::memory_order_relaxed);
-            puct_elapsed_ns.fetch_add(static_cast<std::uint64_t>(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    SearchTimeLimits::Clock::now() - started).count()),
-                std::memory_order_relaxed);
-        }
+    // DFS/GAT/FFT use shared mutable state. Wait for the complete DFS pass
+    // before reading the tree or updating PUCT statistics. This full-DFS
+    // barrier avoids races on ancestors and shared FFT/GAT work buffers.
+    if (ctx.puct_ready[0] && St.tree.childCount[0] != 0 &&
+        SearchTimeLimits::Clock::now() < hard_deadline) {
+        const auto started = SearchTimeLimits::Clock::now();
+        const uint32_t best = RunPUCT(
+            St, ctx.puct_states, ctx.puct_iterations, 1.0f, 1.0f, 0,
+            ctx.puct_ready);
+        puct_did_run.store(best != UINT32_MAX, std::memory_order_relaxed);
+        puct_elapsed_ns.fetch_add(static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                SearchTimeLimits::Clock::now() - started).count()),
+            std::memory_order_relaxed);
     }
 }
 
@@ -252,8 +246,6 @@ InterleaveFFT(
 
     {
         std::lock_guard<std::mutex> lock(ctx.puct_mutex);
-        ctx.puct_queue_head = 0;
-        ctx.puct_queue_count = 0;
         ctx.puct_done = false;
     }
     EvaluateSingleNodeGAT(St, ctx, nodeIndex, 0, workingFFT, whiteToMove);
