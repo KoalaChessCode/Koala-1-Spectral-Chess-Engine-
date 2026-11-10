@@ -231,10 +231,6 @@ add_custom_target(
 )
 add_dependencies(Koala1Build Koala1HostObjects GpuKernels)
 
-option(KOALA_BUILD_TRAINER "Build the separate training utility" OFF)
-if(KOALA_BUILD_TRAINER)
-    include(cmake/KoalaTrainer.cmake)
-endif()
 
 
 
