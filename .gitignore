@@ -1,9 +1,8 @@
 
 build/
-app/
-training/
-TRAINER_INSTRUCTIONS.md
-cmake/
+DATA/
+
+
 
 
 weights/*.bin

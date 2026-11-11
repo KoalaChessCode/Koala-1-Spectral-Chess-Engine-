@@ -22,6 +22,8 @@ struct TimeManagementParameters
     static constexpr double eta = 0.8;
     static constexpr double kappa = 1.5;
     static constexpr double q = 0.5;
+    static constexpr double T0 = 60000.0;
+    static constexpr double alpha = 0.20;
     static constexpr std::int64_t reserve_ms = 100;
     static constexpr std::int64_t default_moves_to_go = 30;
 };
@@ -37,10 +39,15 @@ inline SearchTimeLimits MakeSearchTimeLimits(
     const double I = static_cast<double>(std::max<std::int64_t>(0, increment_ms));
     const double H = static_cast<double>(moves_to_go > 0
         ? moves_to_go : TimeManagementParameters::default_moves_to_go);
-    const double base = T / (H + TimeManagementParameters::kappa)
+    // Bayesian PUCT uncertainty falls as 1/sqrt(N); logarithmic relaxation
+    // increases the time share sublinearly as more clock time is available.
+    const double phi = 1.0 + TimeManagementParameters::alpha *
+        std::log(1.0 + T / TimeManagementParameters::T0);
+    const double base_relaxed = phi *
+        (T / (H + TimeManagementParameters::kappa))
         + TimeManagementParameters::eta * I;
     const double budget = std::max(0.0, std::min({
-        base,
+        base_relaxed,
         TimeManagementParameters::q * T,
         T - static_cast<double>(TimeManagementParameters::reserve_ms)
     }));
@@ -177,7 +184,7 @@ inline void RunDelayedPUCTWorker(
         const auto started = SearchTimeLimits::Clock::now();
         const uint32_t best = RunPUCT(
             St, ctx.puct_states, ctx.puct_iterations, 1.0f, 1.0f, 0,
-            ctx.puct_ready);
+            ctx.puct_ready, hard_deadline);
         puct_did_run.store(best != UINT32_MAX, std::memory_order_relaxed);
         puct_elapsed_ns.fetch_add(static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -692,6 +699,24 @@ if (!current.expanded)
     }
     ctx.puct_cv.notify_all();
     puctWorker.join();
+
+    // Spend a small, bounded PUCT batch on the already-built tree when the
+    // primary search finishes early. The clock reserve is already excluded
+    // from hard_deadline by MakeSearchTimeLimits.
+    constexpr int extra_puct_iterations = 40;
+    constexpr auto puct_deadline_margin = std::chrono::milliseconds(1);
+    if (puct_did_run.load(std::memory_order_relaxed) &&
+        St.tree.childCount[0] != 0 &&
+        SearchTimeLimits::Clock::now() + puct_deadline_margin <
+            time_limits.hard_deadline) {
+        const auto started = SearchTimeLimits::Clock::now();
+        RunPUCT(St, ctx.puct_states, extra_puct_iterations, 1.0f, 1.0f, 0,
+                ctx.puct_ready, time_limits.hard_deadline, false);
+        puct_elapsed_ns.fetch_add(static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                SearchTimeLimits::Clock::now() - started).count()),
+            std::memory_order_relaxed);
+    }
 
     std::size_t ready_count = 0;
     {

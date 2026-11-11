@@ -2,6 +2,7 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -280,7 +281,10 @@ inline uint32_t RunPUCT(
     float c_puct = 1.0f,
     float beta = 1.0f,
     uint32_t start_node = 0,
-    const bool* ready = nullptr
+    const bool* ready = nullptr,
+    std::chrono::steady_clock::time_point deadline =
+        std::chrono::steady_clock::time_point::max(),
+    bool initialize_root = true
 ) {
     if (states == nullptr || iterations < 0)
         return std::numeric_limits<uint32_t>::max();
@@ -315,14 +319,20 @@ inline uint32_t RunPUCT(
         if (ready && !ready[child])
             return std::numeric_limits<uint32_t>::max();
     }
-    for (uint16_t i = 0; i < root_count; ++i) {
-        const uint32_t child = root_begin + i;
-        // One initial simulation per root alternative, propagated through
-        // the existing Bayesian update path exactly once.
-        backpropagate_bayes(child, states[child].mu_0, states, St.tree);
+    if (initialize_root) {
+        for (uint16_t i = 0; i < root_count; ++i) {
+            if (std::chrono::steady_clock::now() >= deadline)
+                return select_best_root_child(St.tree, states, ready);
+            const uint32_t child = root_begin + i;
+            // One initial simulation per root alternative, propagated through
+            // the existing Bayesian update path exactly once.
+            backpropagate_bayes(child, states[child].mu_0, states, St.tree);
+        }
     }
 
     for (int iter = 0; iter < iterations; ++iter) {
+        if (std::chrono::steady_clock::now() >= deadline)
+            break;
         uint32_t current = start_node; // <-- START Z PODANEGO WĘZŁA
 
         while (St.tree.ChildCount(current) > 0) {
