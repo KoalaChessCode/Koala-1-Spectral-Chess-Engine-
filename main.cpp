@@ -184,7 +184,7 @@ int main(void)
 
 
     
-    Arena gatv2Arena(2 * 1024 * 1024);    
+    Arena gatv2Arena(8 * 1024 * 1024);//Alloated 8MB ON EMBEDDINGS 
 
     if (!Context.allocate(gatv2Arena))
     {

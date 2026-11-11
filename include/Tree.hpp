@@ -4,6 +4,7 @@
 #include "Delta.hpp"
 
 
+
 template<typename T>
 struct Node
 {
@@ -215,7 +216,7 @@ struct TreeStateWrapper
     Tree<Board> tree;
 
     TreeStateWrapper(
-        std::size_t treeSize = 300,
+        std::size_t treeSize = TREE_SIZE,    
         std::size_t arenaSize = 1 * 1024 * 1024   // ← NEW
     )
         : memory(arenaSize),

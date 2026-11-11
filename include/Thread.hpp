@@ -13,11 +13,11 @@
 #include "Delta.hpp"
 #include "memory.hpp"
 #include "Tree.hpp"
-
+#include "Constants.hpp"
 
 struct PipelineContext 
 {
-    static constexpr std::size_t TREE_SIZE = 300;
+    static constexpr std::size_t TREE_SIZE = ::TREE_SIZE; // Bierze z Constants.hpp
     PuctState* puct_states = nullptr;
     bool* puct_ready = nullptr;
     float* gatv2_embeddings = nullptr;
