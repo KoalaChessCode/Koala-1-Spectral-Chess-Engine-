@@ -309,23 +309,18 @@ inline uint32_t RunPUCT(
             return std::numeric_limits<uint32_t>::max();
     }
 
-    // Complete the root's broad base before spending any additional budget
-    // below it. The worker invokes RunPUCT only after DFS has published all
-    // available nodes, so every legal root child is ready here.
     const uint32_t root_begin = St.tree.childBegin[0];
     const uint16_t root_count = St.tree.childCount[0];
-    for (uint16_t i = 0; i < root_count; ++i) {
-        const uint32_t child = root_begin + i;
-        if (ready && !ready[child])
-            return std::numeric_limits<uint32_t>::max();
-    }
+    
+    
     if (initialize_root) {
         for (uint16_t i = 0; i < root_count; ++i) {
             if (std::chrono::steady_clock::now() >= deadline)
                 return select_best_root_child(St.tree, states, ready);
             const uint32_t child = root_begin + i;
-            // One initial simulation per root alternative, propagated through
-            // the existing Bayesian update path exactly once.
+            
+            if (ready && !ready[child]) continue; // <--- POMIŃ NIEGOTOWE
+            
             backpropagate_bayes(child, states[child].mu_0, states, St.tree);
         }
     }

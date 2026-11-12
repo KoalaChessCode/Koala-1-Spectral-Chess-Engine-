@@ -109,26 +109,27 @@ foreach(GPU_SRC IN LISTS GPU_KERNEL_SOURCES)
     )
 
     add_custom_command(
-        OUTPUT "${GPU_OBJ}"
+    OUTPUT "${GPU_OBJ}"
 
-        COMMAND "${CLANG17_CXX}"
-            -std=c++17
-            -O3
-            -fopenmp
-            -fopenmp-targets=amdgcn-amd-amdhsa
-            -Xopenmp-target=amdgcn-amd-amdhsa
-            -march=gfx803
-            "-I${CMAKE_CURRENT_SOURCE_DIR}/include"
-            -c "${GPU_SRC}"
-            -o "${GPU_OBJ}"
+    COMMAND "${CLANG17_CXX}"
+        -std=c++17
+        -O3
+        -fno-math-errno
+        -fno-trapping-math
+        -fno-signed-zeros
+        -ffp-contract=fast
+        -fopenmp
+        -fopenmp-targets=amdgcn-amd-amdhsa
+        -Xopenmp-target=amdgcn-amd-amdhsa
+        -march=gfx803
+        "-I${CMAKE_CURRENT_SOURCE_DIR}/include"
+        -c "${GPU_SRC}"
+        -o "${GPU_OBJ}"
 
-        DEPENDS "${GPU_SRC}"
-
-        COMMENT
-            "Clang 17: kompilacja GPU ${GPU_NAME} (gfx803)..."
-
-        VERBATIM
-    )
+    DEPENDS "${GPU_SRC}"
+    COMMENT "Clang 17: kompilacja GPU ${GPU_NAME} (gfx803)..."
+    VERBATIM
+)
 
     list(APPEND GPU_KERNEL_OBJECTS "${GPU_OBJ}")
 
@@ -195,9 +196,10 @@ add_custom_command(
     COMMAND "${CLANG17_CXX}"
         -fopenmp
         -fopenmp-targets=amdgcn-amd-amdhsa
-        -Xopenmp-target=amdgcn-amd-amdhsa
+        -fopenmp
         -march=gfx803
 
+        
         $<TARGET_OBJECTS:Koala1HostObjects>
         ${GPU_KERNEL_OBJECTS}
 

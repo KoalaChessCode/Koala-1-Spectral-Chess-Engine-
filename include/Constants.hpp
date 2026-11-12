@@ -49,7 +49,7 @@ constexpr U8 CASTLE_BLACK_QUEENSIDE = 212;
 
 constexpr std::string_view INITIAL_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
-constexpr std::size_t TREE_SIZE = 500;//Size of nodes in Tree
+constexpr std::size_t TREE_SIZE = 1000;//Size of nodes in Tree
 
 bool WHITE = true;
 bool BLACK = true;
