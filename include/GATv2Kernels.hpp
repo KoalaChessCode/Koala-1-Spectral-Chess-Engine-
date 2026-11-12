@@ -23,7 +23,8 @@ GATv2GpuContext* gatv2_gpu_create(
     int K,
     int H,
     int D,
-    int max_neighbors
+    int max_neighbors,
+    int max_batch_nodes
 ) noexcept;
 
 // ============================================================
@@ -37,6 +38,16 @@ GATv2GpuContext* gatv2_gpu_create(
 int gatv2_gpu_run(
     GATv2GpuContext* ctx,
     const float* node,
+    const float* neighbors,
+    int N,
+    float* h_src,
+    float* neighbor_out
+) noexcept;
+
+int gatv2_gpu_run_batch(
+    GATv2GpuContext* ctx,
+    const float* nodes,
+    int batch_count,
     const float* neighbors,
     int N,
     float* h_src,

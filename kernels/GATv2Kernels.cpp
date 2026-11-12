@@ -37,6 +37,7 @@ struct GATv2GpuContext
     int D = 0;
     int HD = 0;
     int max_neighbors = 0;
+    int max_batch_nodes = 0;
 
     std::size_t weight_both_count = 0;
     std::size_t input_capacity = 0;
@@ -196,12 +197,14 @@ static bool project_both_device(
     const float* d_X,
     float* d_Y,
     int HD,
+    int batch_count,
     int N,
     int device
 ) noexcept
 {
     if (N < 0 ||
-        N == std::numeric_limits<int>::max() ||
+        batch_count <= 0 ||
+        batch_count > std::numeric_limits<int>::max() - N ||
         HD <= 0 ||
         d_W == nullptr ||
         d_X == nullptr ||
@@ -210,7 +213,7 @@ static bool project_both_device(
         return false;
     }
 
-    const int total = N + 1;
+    const int total = batch_count + N;
 
     #pragma omp target teams distribute collapse(2) \
         device(device) is_device_ptr(d_W, d_X, d_Y) \
@@ -219,14 +222,18 @@ static bool project_both_device(
     {
         for (int hd = 0; hd < HD; ++hd)
         {
-            const int row_hd = (n == 0) ? hd : (HD + hd);
+            const bool is_source = n < batch_count;
+            const int row_hd = is_source ? hd : (HD + hd);
+
+            const int input_index = n;
+            const int output_index = n;
 
             const float* __restrict row =
                 d_W + static_cast<std::size_t>(row_hd) *
                       static_cast<std::size_t>(K);
 
             const float* __restrict x =
-                d_X + static_cast<std::size_t>(n) *
+                d_X + static_cast<std::size_t>(input_index) *
                       static_cast<std::size_t>(K);
 
             float sum = 0.0f;
@@ -238,7 +245,7 @@ static bool project_both_device(
             }
 
             d_Y[
-                static_cast<std::size_t>(n) *
+                static_cast<std::size_t>(output_index) *
                 static_cast<std::size_t>(HD) +
                 static_cast<std::size_t>(hd)
             ] = sum;
@@ -282,7 +289,8 @@ GATv2GpuContext* gatv2_gpu_create(
     int K,
     int H,
     int D,
-    int max_neighbors
+    int max_neighbors,
+    int max_batch_nodes
 ) noexcept
 {
     if (W_heads_src == nullptr ||
@@ -291,7 +299,8 @@ GATv2GpuContext* gatv2_gpu_create(
         H <= 0 ||
         D <= 0 ||
         max_neighbors <= 0 ||
-        max_neighbors == std::numeric_limits<int>::max())
+        max_neighbors == std::numeric_limits<int>::max() ||
+        max_batch_nodes <= 0)
     {
         return nullptr;
     }
@@ -341,11 +350,13 @@ GATv2GpuContext* gatv2_gpu_create(
             2,
             weight_both_count) ||
         !checked_mul(
-            static_cast<std::size_t>(max_neighbors) + 1,
+            static_cast<std::size_t>(max_neighbors) +
+                static_cast<std::size_t>(max_batch_nodes),
             static_cast<std::size_t>(K),
             input_capacity) ||
         !checked_mul(
-            static_cast<std::size_t>(max_neighbors) + 1,
+            static_cast<std::size_t>(max_neighbors) +
+                static_cast<std::size_t>(max_batch_nodes),
             HD_size,
             output_capacity))
     {
@@ -374,6 +385,7 @@ GATv2GpuContext* gatv2_gpu_create(
     ctx->D = D;
     ctx->HD = static_cast<int>(HD_size);
     ctx->max_neighbors = max_neighbors;
+    ctx->max_batch_nodes = max_batch_nodes;
 
     ctx->weight_both_count = weight_both_count;
     ctx->input_capacity = input_capacity;
@@ -469,10 +481,10 @@ GATv2GpuContext* gatv2_gpu_create(
 // Run projections
 // ============================================================
 
-extern "C"
-int gatv2_gpu_run(
+static int gatv2_gpu_run_batch_impl(
     GATv2GpuContext* ctx,
-    const float* node,
+    const float* nodes,
+    int batch_count,
     const float* neighbors,
     int N,
     float* h_src,
@@ -486,8 +498,10 @@ int gatv2_gpu_run(
         ctx->d_Y == nullptr ||
         ctx->h_X_staging == nullptr ||
         ctx->h_Y_staging == nullptr ||
-        node == nullptr ||
+        nodes == nullptr ||
         h_src == nullptr ||
+        batch_count <= 0 ||
+        batch_count > ctx->max_batch_nodes ||
         N < 0 ||
         N > ctx->max_neighbors)
     {
@@ -506,21 +520,23 @@ int gatv2_gpu_run(
     const int host_device = ctx->host_device;
 
     const std::size_t total =
-        static_cast<std::size_t>(N) + 1;
+        static_cast<std::size_t>(batch_count) +
+        static_cast<std::size_t>(N);
 
    // ---- 1. Collect the node and its neighbors into staging ----
     float* h_X = ctx->h_X_staging.get();
 
     std::memcpy(
         h_X,
-        node,
-        static_cast<std::size_t>(K) * sizeof(float)
+        nodes,
+        static_cast<std::size_t>(batch_count) *
+            static_cast<std::size_t>(K) * sizeof(float)
     );
 
     if (N > 0)
     {
         std::memcpy(
-            h_X + static_cast<std::size_t>(K),
+            h_X + static_cast<std::size_t>(batch_count) * K,
             neighbors,
             static_cast<std::size_t>(N) *
                 static_cast<std::size_t>(K) *
@@ -548,23 +564,21 @@ int gatv2_gpu_run(
   // ---- 3. Cooperative SIMT kernel ----
     bool ok = false;
 
-if (ctx->K == 4096)
-{
-    ok = project_both_device<4096>(
-        ctx->d_W_both, ctx->d_X, ctx->d_Y,
-        ctx->HD, N, ctx->device
-    );
-}
-else if (ctx->K == 512)
-{
-    ok = project_both_device<512>(
-        ctx->d_W_both, ctx->d_X, ctx->d_Y,
-        ctx->HD, N, ctx->device
-    );
-}
+    if (ctx->K == 4096)
+    {
+        ok = project_both_device<4096>(
+            ctx->d_W_both, ctx->d_X, ctx->d_Y,
+            ctx->HD, batch_count, N, ctx->device);
+    }
+    else if (ctx->K == 512)
+    {
+        ok = project_both_device<512>(
+            ctx->d_W_both, ctx->d_X, ctx->d_Y,
+            ctx->HD, batch_count, N, ctx->device);
+    }
 
-if (!ok)
-    return 0;
+    if (!ok)
+        return 0;
 
   // ---- 4. One transfer device -> host ----
     const std::size_t output_count =
@@ -590,13 +604,14 @@ if (!ok)
         h_src,
         h_Y,
         static_cast<std::size_t>(HD) * sizeof(float)
+        * static_cast<std::size_t>(batch_count)
     );
 
     if (N > 0)
     {
         std::memcpy(
             neighbor_out,
-            h_Y + static_cast<std::size_t>(HD),
+            h_Y + static_cast<std::size_t>(HD) * batch_count,
             static_cast<std::size_t>(N) *
                 static_cast<std::size_t>(HD) *
                 sizeof(float)
@@ -604,6 +619,35 @@ if (!ok)
     }
 
     return 1;
+}
+
+extern "C"
+int gatv2_gpu_run_batch(
+    GATv2GpuContext* ctx,
+    const float* nodes,
+    int batch_count,
+    const float* neighbors,
+    int N,
+    float* h_src,
+    float* neighbor_out
+) noexcept
+{
+    return gatv2_gpu_run_batch_impl(
+        ctx, nodes, batch_count, neighbors, N, h_src, neighbor_out);
+}
+
+extern "C"
+int gatv2_gpu_run(
+    GATv2GpuContext* ctx,
+    const float* node,
+    const float* neighbors,
+    int N,
+    float* h_src,
+    float* neighbor_out
+) noexcept
+{
+    return gatv2_gpu_run_batch_impl(
+        ctx, node, 1, neighbors, N, h_src, neighbor_out);
 }
 
 // ============================================================

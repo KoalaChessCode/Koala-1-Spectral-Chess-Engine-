@@ -60,6 +60,7 @@ constexpr int MAX_HEADS     = 32;
 constexpr int MAX_LAYERS    = 8;
 constexpr int MAX_HIDDEN    = 64;
 constexpr int MAX_NEIGHBORS = 256;
+constexpr int MAX_GAT_BATCH_NODES = 256;
 
 constexpr float GAT_LEAKY_SLOPE = 0.20f;
 
@@ -434,6 +435,7 @@ struct GATv2Workspace
 
 
     int max_neighbors = 0;
+    int max_batch_nodes = 0;
     int embed_dim     = 0;
 
 
@@ -445,6 +447,10 @@ struct GATv2Workspace
         neighbor_b;
 
     std::unique_ptr<float[]> neighbor_input;
+    std::unique_ptr<float[]> batch_node_a;
+    std::unique_ptr<float[]> batch_node_b;
+    std::unique_ptr<float[]> batch_h_src;
+    std::unique_ptr<float[]> batch_attention_scores;
 
     float attention_scores[
         MAX_NEIGHBORS
@@ -452,11 +458,14 @@ struct GATv2Workspace
 
 
     bool init(
-        int max_neighbors_
+        int max_neighbors_,
+        int max_batch_nodes_ = MAX_GAT_BATCH_NODES
     )
     {
         if (max_neighbors_ <= 0 ||
-            max_neighbors_ > MAX_NEIGHBORS)
+            max_neighbors_ > MAX_NEIGHBORS ||
+            max_batch_nodes_ <= 0 ||
+            max_batch_nodes_ > MAX_GAT_BATCH_NODES)
         {
             return false;
         }
@@ -464,6 +473,8 @@ struct GATv2Workspace
 
         max_neighbors =
             max_neighbors_;
+
+        max_batch_nodes = max_batch_nodes_;
 
 
         embed_dim =
@@ -493,14 +504,27 @@ try
             static_cast<std::size_t>(max_neighbors) *
             FFT_SIZE
         );
+
+    const std::size_t batch_count =
+        static_cast<std::size_t>(max_batch_nodes) * embed_dim;
+    batch_node_a = std::make_unique<float[]>(batch_count);
+    batch_node_b = std::make_unique<float[]>(batch_count);
+    batch_h_src = std::make_unique<float[]>(batch_count);
+    batch_attention_scores = std::make_unique<float[]>(
+        static_cast<std::size_t>(max_batch_nodes) * MAX_NEIGHBORS);
 }
 catch (...)
 {
     neighbor_a.reset();
     neighbor_b.reset();
     neighbor_input.reset();
+    batch_node_a.reset();
+    batch_node_b.reset();
+    batch_h_src.reset();
+    batch_attention_scores.reset();
 
     max_neighbors = 0;
+    max_batch_nodes = 0;
     embed_dim = 0;
 
     return false;
@@ -901,6 +925,155 @@ bool forward(
     return true;
 }
 
+bool forward_batch(
+    const float* node_inputs,
+    int batch_count,
+    const float* const neighbor_inputs[],
+    int num_neighbors,
+    float* output,
+    float* neighbor_output,
+    float* h_src_batch,
+    float* attention_scores,
+    float* packed_neighbors
+) const noexcept
+{
+    if (weights == nullptr ||
+        node_inputs == nullptr ||
+        output == nullptr ||
+        neighbor_output == nullptr ||
+        h_src_batch == nullptr ||
+        attention_scores == nullptr ||
+        batch_count <= 0 ||
+        batch_count > MAX_GAT_BATCH_NODES ||
+        num_neighbors < 0 ||
+        num_neighbors > MAX_NEIGHBORS)
+        return false;
+
+    const std::size_t output_count =
+        static_cast<std::size_t>(batch_count) * EMBED_DIM;
+    std::memset(output, 0, output_count * sizeof(float));
+    if (num_neighbors == 0)
+        return true;
+    if (neighbor_inputs == nullptr || packed_neighbors == nullptr)
+        return false;
+    for (int j = 0; j < num_neighbors; ++j)
+        if (neighbor_inputs[j] == nullptr)
+            return false;
+
+    for (int j = 0; j < num_neighbors; ++j)
+        std::memcpy(
+            packed_neighbors + static_cast<std::size_t>(j) * input_dim,
+            neighbor_inputs[j],
+            static_cast<std::size_t>(input_dim) * sizeof(float));
+
+    if (gpu != nullptr)
+    {
+        if (!gatv2_gpu_run_batch(
+                gpu, node_inputs, batch_count, packed_neighbors,
+                num_neighbors, h_src_batch, neighbor_output))
+            return false;
+    }
+    else
+    {
+        for (int m = 0; m < NUM_HEADS; ++m)
+        {
+            const float* Wsrc = weights->W_src[layer_idx][m].get();
+            const float* Wtgt = weights->W_tgt[layer_idx][m].get();
+            if (Wsrc == nullptr || Wtgt == nullptr)
+                return false;
+
+            for (int b = 0; b < batch_count; ++b)
+            {
+                const float* node =
+                    node_inputs + static_cast<std::size_t>(b) * input_dim;
+                float* h_src = h_src_batch +
+                    static_cast<std::size_t>(b) * EMBED_DIM +
+                    static_cast<std::size_t>(m) * HIDDEN_DIM;
+                for (int d = 0; d < HIDDEN_DIM; ++d)
+                    h_src[d] = DotFloat(
+                        Wsrc + static_cast<std::size_t>(d) * input_dim,
+                        node, input_dim);
+            }
+
+            for (int j = 0; j < num_neighbors; ++j)
+            {
+                float* projected = neighbor_output +
+                    static_cast<std::size_t>(j) * EMBED_DIM +
+                    static_cast<std::size_t>(m) * HIDDEN_DIM;
+                const float* neighbor = packed_neighbors +
+                    static_cast<std::size_t>(j) * input_dim;
+                for (int d = 0; d < HIDDEN_DIM; ++d)
+                    projected[d] = DotFloat(
+                        Wtgt + static_cast<std::size_t>(d) * input_dim,
+                        neighbor, input_dim);
+            }
+        }
+    }
+
+    for (int b = 0; b < batch_count; ++b)
+    {
+        float* child_output =
+            output + static_cast<std::size_t>(b) * EMBED_DIM;
+        float* child_scores =
+            attention_scores + static_cast<std::size_t>(b) * MAX_NEIGHBORS;
+
+        for (int m = 0; m < NUM_HEADS; ++m)
+        {
+            const float* h_src = h_src_batch +
+                static_cast<std::size_t>(b) * EMBED_DIM +
+                static_cast<std::size_t>(m) * HIDDEN_DIM;
+            const float* a_m = weights->a[layer_idx][m].get();
+            if (a_m == nullptr)
+                return false;
+
+            for (int j = 0; j < num_neighbors; ++j)
+            {
+                const float* h_tgt = neighbor_output +
+                    static_cast<std::size_t>(j) * EMBED_DIM +
+                    static_cast<std::size_t>(m) * HIDDEN_DIM;
+                float logit = 0.0f;
+                for (int d = 0; d < HIDDEN_DIM; ++d)
+                    logit += a_m[d] * LeakyReLU(h_src[d] + h_tgt[d]);
+                child_scores[j] = logit;
+            }
+
+            float max_score = child_scores[0];
+            for (int j = 1; j < num_neighbors; ++j)
+                max_score = std::max(max_score, child_scores[j]);
+
+            float exp_sum = 0.0f;
+            for (int j = 0; j < num_neighbors; ++j)
+            {
+                const float e = std::exp(child_scores[j] - max_score);
+                child_scores[j] = e;
+                exp_sum += e;
+            }
+            if (!(exp_sum > 0.0f) || !std::isfinite(exp_sum))
+                return false;
+
+            const float inv_exp_sum = 1.0f / exp_sum;
+            for (int j = 0; j < num_neighbors; ++j)
+                child_scores[j] *= inv_exp_sum;
+
+            float* head_output = child_output +
+                static_cast<std::size_t>(m) * HIDDEN_DIM;
+            for (int j = 0; j < num_neighbors; ++j)
+            {
+                const float alpha = child_scores[j];
+                const float* projected = neighbor_output +
+                    static_cast<std::size_t>(j) * EMBED_DIM +
+                    static_cast<std::size_t>(m) * HIDDEN_DIM;
+                for (int d = 0; d < HIDDEN_DIM; ++d)
+                    head_output[d] += alpha * projected[d];
+            }
+            constexpr float SELF_LOOP_LAMBDA = 0.10f;
+            for (int d = 0; d < HIDDEN_DIM; ++d)
+                head_output[d] += SELF_LOOP_LAMBDA * h_src[d];
+        }
+    }
+    return true;
+}
+
 };
 // ============================================================
 // GATv2Network
@@ -1033,7 +1206,8 @@ if (gatv2_gpu_available() > 0)
                 weights->input_dim[l],
                 NUM_HEADS,
                 HIDDEN_DIM,
-                MAX_NEIGHBORS
+                MAX_NEIGHBORS,
+                MAX_GAT_BATCH_NODES
             );
 
             if (gpu == nullptr)
@@ -1397,6 +1571,96 @@ bool load_weights(const char* path)
         );
 
 
+        return true;
+    }
+
+    bool forward_batch(
+        const float* node_inputs,
+        int batch_count,
+        const float* const neighbors_fft[],
+        int num_neighbors,
+        float* output,
+        Workspace& workspace
+    ) const noexcept
+    {
+        if (weights == nullptr || node_inputs == nullptr || output == nullptr ||
+            batch_count <= 0 ||
+            batch_count > workspace.max_batch_nodes ||
+            num_neighbors < 0 ||
+            num_neighbors > workspace.max_neighbors ||
+            workspace.embed_dim < EMBED_DIM ||
+            workspace.batch_node_a == nullptr ||
+            workspace.batch_node_b == nullptr ||
+            workspace.batch_h_src == nullptr ||
+            workspace.batch_attention_scores == nullptr ||
+            workspace.neighbor_input == nullptr ||
+            workspace.buffer_a() == nullptr ||
+            workspace.buffer_b() == nullptr)
+            return false;
+        if (num_neighbors > 0 && neighbors_fft == nullptr)
+            return false;
+        for (int j = 0; j < num_neighbors; ++j)
+            if (neighbors_fft[j] == nullptr)
+                return false;
+
+        const float* layer_input = node_inputs;
+        float* next_layer_input = workspace.batch_node_a.get();
+        float* next_neighbor_buffer = workspace.buffer_a();
+        float* current_neighbor_buffer = nullptr;
+        const std::size_t batch_embed_count =
+            static_cast<std::size_t>(batch_count) * EMBED_DIM;
+        const std::size_t batch_embed_bytes =
+            batch_embed_count * sizeof(float);
+        const float* layer_neighbor_inputs[MAX_NEIGHBORS];
+
+        for (int l = 0; l < NUM_LAYERS; ++l)
+        {
+            if (l == 0)
+            {
+                for (int j = 0; j < num_neighbors; ++j)
+                    layer_neighbor_inputs[j] = neighbors_fft[j];
+            }
+            else
+            {
+                for (int j = 0; j < num_neighbors; ++j)
+                    layer_neighbor_inputs[j] = current_neighbor_buffer +
+                        static_cast<std::size_t>(j) * EMBED_DIM;
+            }
+
+            const bool ok = layers[l].forward_batch(
+                layer_input,
+                batch_count,
+                layer_neighbor_inputs,
+                num_neighbors,
+                next_layer_input,
+                next_neighbor_buffer,
+                workspace.batch_h_src.get(),
+                workspace.batch_attention_scores.get(),
+                workspace.neighbor_input.get());
+            if (!ok)
+                return false;
+
+            if (weights->input_dim[l] == EMBED_DIM)
+            {
+                constexpr float RESIDUAL_SCALE = 0.10f;
+                for (std::size_t i = 0; i < batch_embed_count; ++i)
+                    next_layer_input[i] +=
+                        RESIDUAL_SCALE * layer_input[i];
+            }
+
+            layer_input = next_layer_input;
+            current_neighbor_buffer = next_neighbor_buffer;
+            next_layer_input =
+                next_layer_input == workspace.batch_node_a.get()
+                    ? workspace.batch_node_b.get()
+                    : workspace.batch_node_a.get();
+            next_neighbor_buffer =
+                next_neighbor_buffer == workspace.buffer_a()
+                    ? workspace.buffer_b()
+                    : workspace.buffer_a();
+        }
+
+        std::memcpy(output, layer_input, batch_embed_bytes);
         return true;
     }
 };
