@@ -406,6 +406,7 @@ if (!current.expanded)
                         St.tree, current.nodeIndex, childIndex, InstanceOne, move);
                 }
             }
+
         }
     }
 
@@ -473,7 +474,17 @@ if (!current.expanded)
                 }
             }
         }
+
     }
+
+    if (depth + 1 < MaxDepth)
+        EvaluateSiblingBatchGAT(
+            St,
+            ctx,
+            current.nodeIndex,
+            static_cast<int>(depth),
+            workingFFT,
+            current.whiteToMove);
 }
 
         // ====================================================
@@ -573,8 +584,12 @@ if (!current.expanded)
             // =================================================
             // OCENA GATv2 (dla tego konkretnego dziecka)
             // =================================================
-            EvaluateSingleNodeGAT(St, ctx, childIndex, depth, workingFFT,
-                                  !current.whiteToMove);
+            if (ctx.puct_ready[childIndex])
+                UpdateFFTHistoryOnly(
+                    St, ctx, childIndex, depth, workingFFT);
+            else
+                EvaluateSingleNodeGAT(St, ctx, childIndex, depth, workingFFT,
+                                      !current.whiteToMove);
 
             // =================================================
             // INIT CHILD CURSOR (dla DFS)

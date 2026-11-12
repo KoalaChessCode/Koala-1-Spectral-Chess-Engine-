@@ -29,6 +29,7 @@ struct PipelineContext
     std::atomic<std::uint64_t> total_ns{0};
     std::atomic<std::int64_t> gatv2_last_report_ns{0};
     std::mutex puct_mutex;
+    std::mutex gatv2_mutex;
     std::condition_variable puct_cv;
     bool puct_done = false;
     int puct_iterations = 10;
@@ -39,6 +40,7 @@ struct PipelineContext
     FFTWorking* fft_working_history = nullptr;   // [HISTORY_K] // [32] = 512 KiB
     float*      fft_interleaved     = nullptr;   // [HISTORY_K][FFT_FLOATS]// // [32][4096] = 512 KiB
     std::uint32_t* fft_history_nodes = nullptr;
+    float* gatv2_batch_fft = nullptr;             // [MAX_NEIGHBORS][FFT_FLOATS]
 
     inline void Stop() noexcept {
         guard.store(false, std::memory_order_relaxed);
@@ -80,6 +82,11 @@ struct PipelineContext
 
     fft_history_nodes = arena.template allocate<std::uint32_t>(HISTORY_K);
     if (!fft_history_nodes) return false;
+
+    gatv2_batch_fft = arena.template allocate<float>(
+        static_cast<std::size_t>(MAX_NEIGHBORS) * FFT_FLOATS
+    );
+    if (!gatv2_batch_fft) return false;
 
 
     for (std::size_t i = 0; i < TREE_SIZE; ++i)
