@@ -32,7 +32,7 @@ struct PipelineContext
     std::mutex gatv2_mutex;
     std::condition_variable puct_cv;
     bool puct_done = false;
-    int puct_iterations = 10;
+    int puct_iterations = 500;
 
     DefaultGATv2Network*   gatv2           = nullptr;
     DefaultGATv2Workspace* gatv2_workspace = nullptr;

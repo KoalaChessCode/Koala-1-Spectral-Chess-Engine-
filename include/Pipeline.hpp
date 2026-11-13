@@ -280,7 +280,7 @@ InterleaveFFT(
     // DFS STACK
     // ========================================================
 
-    constexpr std::size_t MaxDepth = 128;
+    constexpr std::size_t MaxDepth = 20;
 
     struct Cursor
     {
@@ -304,7 +304,7 @@ InterleaveFFT(
 
     std::array<
         Cursor,
-        MaxDepth
+        MaxDepth + 1
     > stack{};
 
 
@@ -477,7 +477,7 @@ if (!current.expanded)
 
     }
 
-    if (depth + 1 < MaxDepth)
+    if (depth < MaxDepth)
         EvaluateSiblingBatchGAT(
             St,
             ctx,

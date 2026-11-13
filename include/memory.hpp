@@ -9,7 +9,7 @@ struct Arena
 
     explicit Arena(std::size_t size_ = 256 * 1024 * 1024) 
         : size(size_),
-          arena(std::make_unique<std::byte[]>(size_))
+          arena(std::unique_ptr<std::byte[]>(new std::byte[size_])) 
     {
     }
 

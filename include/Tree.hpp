@@ -217,7 +217,7 @@ struct TreeStateWrapper
 
     TreeStateWrapper(
         std::size_t treeSize = TREE_SIZE,    
-        std::size_t arenaSize = 1 * 1024 * 1024   // ← NEW
+        std::size_t arenaSize = 16 * 1024 * 1024   // ← NEW
     )
         : memory(arenaSize),
           tree(memory, treeSize)
