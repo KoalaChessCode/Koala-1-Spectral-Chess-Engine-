@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <cmath>
+#include <version>
 #include <cassert>
 
 struct FftImpulse
@@ -270,8 +271,17 @@ constexpr auto MakeFFTLUT()
     return lut;
 }
 
+#if (defined(__cpp_lib_constexpr_cmath) && __cpp_lib_constexpr_cmath >= 202202L) || \
+    (defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 16)
+#define KOALA_CONSTEXPR_MATH constexpr
+#else
+#define KOALA_CONSTEXPR_MATH
+#endif
+
 alignas(64)
-inline constexpr auto FFTLUT = MakeFFTLUT();
+inline KOALA_CONSTEXPR_MATH auto FFTLUT = MakeFFTLUT();
+
+#undef KOALA_CONSTEXPR_MATH
 
 inline void ApplyImpulseFFT(
     FFTWorking& fft,
