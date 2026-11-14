@@ -110,115 +110,165 @@ else()
     set(KOALA_HOST_CXX_STANDARD_FLAG "")
 endif()
 
-set(GPU_ARCH "gfx803" CACHE STRING "AMD GPU architecture for OpenMP offloading")
-if(NOT GPU_ARCH MATCHES "^gfx[0-9a-z]+$")
-    message(FATAL_ERROR "Invalid GPU_ARCH='${GPU_ARCH}'. Expected an AMD target such as gfx803.")
+if(DEFINED ENV{KOALA_BACKEND})
+    set(_koala_backend_default "$ENV{KOALA_BACKEND}")
+else()
+    set(_koala_backend_default "AUTO")
+endif()
+set(KOALA_BACKEND "${_koala_backend_default}" CACHE STRING
+    "Execution backend: AUTO (GPU then CPU), GPU, or CPU")
+set_property(CACHE KOALA_BACKEND PROPERTY STRINGS AUTO GPU CPU)
+string(TOUPPER "${KOALA_BACKEND}" _koala_backend_requested)
+if(NOT _koala_backend_requested MATCHES "^(AUTO|GPU|CPU)$")
+    message(FATAL_ERROR
+        "Invalid KOALA_BACKEND='${KOALA_BACKEND}'. Choose AUTO, GPU, or CPU."
+    )
 endif()
 
+set(GPU_ARCH "gfx803" CACHE STRING "AMD GPU architecture for OpenMP offloading")
 set(GPU_CLANGXX "" CACHE FILEPATH "Clang++ compiler with AMDGPU OpenMP offloading support")
-if(NOT GPU_CLANGXX)
-    find_program(_koala_gpu_clangxx
-        NAMES clang++-17 clang++
-        HINTS /usr/lib/llvm-17/bin
-        DOC "Clang++ compiler with AMDGPU OpenMP offloading support"
+
+function(_koala_probe_gpu_backend)
+    if(NOT GPU_ARCH MATCHES "^gfx[0-9a-z]+$")
+        set(KOALA_GPU_PROBE_OK FALSE PARENT_SCOPE)
+        set(KOALA_GPU_PROBE_ERROR
+            "Invalid GPU_ARCH='${GPU_ARCH}'. Expected an AMD target such as gfx803."
+            PARENT_SCOPE)
+        return()
+    endif()
+
+    if(NOT GPU_CLANGXX)
+        find_program(_koala_gpu_clangxx
+            NAMES clang++-17 clang++
+            HINTS /usr/lib/llvm-17/bin
+            DOC "Clang++ compiler with AMDGPU OpenMP offloading support"
+        )
+        if(_koala_gpu_clangxx)
+            set(GPU_CLANGXX "${_koala_gpu_clangxx}" CACHE FILEPATH
+                "Clang++ compiler with AMDGPU OpenMP offloading support" FORCE)
+        endif()
+    endif()
+    if(NOT GPU_CLANGXX OR NOT EXISTS "${GPU_CLANGXX}")
+        set(KOALA_GPU_PROBE_OK FALSE PARENT_SCOPE)
+        set(KOALA_GPU_PROBE_ERROR
+            "No GPU Clang++ compiler was found. Install Clang 17+ with AMDGPU OpenMP offloading, or configure with -DGPU_CLANGXX=/path/to/clang++."
+            PARENT_SCOPE)
+        return()
+    endif()
+
+    execute_process(
+        COMMAND "${GPU_CLANGXX}" --version
+        OUTPUT_VARIABLE GPU_CLANG_VERSION_OUTPUT
+        RESULT_VARIABLE GPU_CLANG_VERSION_RESULT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
     )
-    if(_koala_gpu_clangxx)
-        set(GPU_CLANGXX "${_koala_gpu_clangxx}" CACHE FILEPATH
-            "Clang++ compiler with AMDGPU OpenMP offloading support" FORCE)
+    set(GPU_CLANG_VERSION "")
+    string(REGEX MATCH "version ([0-9]+)\\."
+        _gpu_clang_version_match "${GPU_CLANG_VERSION_OUTPUT}")
+    if(_gpu_clang_version_match)
+        set(GPU_CLANG_VERSION "${CMAKE_MATCH_1}")
+    endif()
+    if(NOT GPU_CLANG_VERSION_RESULT EQUAL 0 OR
+       NOT _gpu_clang_version_match OR
+       NOT GPU_CLANG_VERSION MATCHES "^[0-9]+$" OR
+       GPU_CLANG_VERSION LESS 17)
+        set(KOALA_GPU_PROBE_OK FALSE PARENT_SCOPE)
+        set(KOALA_GPU_PROBE_ERROR
+            "GPU compiler '${GPU_CLANGXX}' must be Clang 17 or newer. Detected: ${GPU_CLANG_VERSION_OUTPUT}"
+            PARENT_SCOPE)
+        return()
+    endif()
+
+    get_filename_component(_gpu_clang_real_path "${GPU_CLANGXX}" REALPATH)
+    get_filename_component(_gpu_clang_bin_dir "${_gpu_clang_real_path}" DIRECTORY)
+    get_filename_component(_gpu_llvm_root "${_gpu_clang_bin_dir}" DIRECTORY)
+
+    find_library(GPU_OMP_LIBRARY
+        NAMES omp
+        HINTS "${_gpu_llvm_root}/lib" "${_gpu_llvm_root}/lib64"
+              "${_gpu_llvm_root}/lib/x86_64-linux-gnu"
+    )
+    find_library(GPU_OMPTARGET_LIBRARY
+        NAMES omptarget
+        HINTS "${_gpu_llvm_root}/lib" "${_gpu_llvm_root}/lib64"
+              "${_gpu_llvm_root}/lib/x86_64-linux-gnu"
+    )
+    if(NOT GPU_OMP_LIBRARY OR NOT GPU_OMPTARGET_LIBRARY)
+        set(KOALA_GPU_PROBE_OK FALSE PARENT_SCOPE)
+        set(KOALA_GPU_PROBE_ERROR
+            "GPU Clang ${GPU_CLANG_VERSION} was found at '${GPU_CLANGXX}', but its OpenMP runtime libraries (libomp and libomptarget) were not found under '${_gpu_llvm_root}'. Install the matching LLVM OpenMP runtime."
+            PARENT_SCOPE)
+        return()
+    endif()
+    get_filename_component(GPU_LLVM_LIB_DIR "${GPU_OMP_LIBRARY}" DIRECTORY)
+
+    # Verify the complete OpenMP AMDGPU compile-and-link path during configuration.
+    set(_gpu_offload_probe "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/koala-offload-probe.cpp")
+    set(_gpu_offload_probe_exe "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/koala-offload-probe")
+    file(WRITE "${_gpu_offload_probe}"
+        "int main() {\n"
+        "  int value = 0;\n"
+        "  #pragma omp target map(tofrom: value)\n"
+        "  { value = 1; }\n"
+        "  return value == 1 ? 0 : 1;\n"
+        "}\n"
+    )
+    execute_process(
+        COMMAND "${GPU_CLANGXX}"
+            ${_koala_gcc_toolchain_args}
+            -std=c++20
+            -fopenmp
+            -fopenmp-targets=amdgcn-amd-amdhsa
+            -Xopenmp-target=amdgcn-amd-amdhsa
+            "-march=${GPU_ARCH}"
+            "${_gpu_offload_probe}"
+            "-L${GPU_LLVM_LIB_DIR}"
+            "-Wl,-rpath,${GPU_LLVM_LIB_DIR}"
+            -lomptarget
+            -lomp
+            -o "${_gpu_offload_probe_exe}"
+        RESULT_VARIABLE GPU_OFFLOAD_PROBE_RESULT
+        OUTPUT_VARIABLE GPU_OFFLOAD_PROBE_OUTPUT
+        ERROR_VARIABLE GPU_OFFLOAD_PROBE_ERROR
+    )
+    if(NOT GPU_OFFLOAD_PROBE_RESULT EQUAL 0)
+        set(KOALA_GPU_PROBE_OK FALSE PARENT_SCOPE)
+        set(KOALA_GPU_PROBE_ERROR
+            "Clang '${GPU_CLANGXX}' cannot compile and link an OpenMP offload program for ${GPU_ARCH}.\n${GPU_OFFLOAD_PROBE_OUTPUT}${GPU_OFFLOAD_PROBE_ERROR}"
+            PARENT_SCOPE)
+        return()
+    endif()
+
+    set(KOALA_GPU_PROBE_OK TRUE PARENT_SCOPE)
+    foreach(_gpu_var IN ITEMS GPU_ARCH GPU_CLANGXX GPU_CLANG_VERSION
+            GPU_OMP_LIBRARY GPU_OMPTARGET_LIBRARY GPU_LLVM_LIB_DIR)
+        set(${_gpu_var} "${${_gpu_var}}" PARENT_SCOPE)
+    endforeach()
+endfunction()
+
+if(NOT _koala_backend_requested STREQUAL "CPU")
+    _koala_probe_gpu_backend()
+endif()
+
+if(_koala_backend_requested STREQUAL "GPU" AND NOT KOALA_GPU_PROBE_OK)
+    message(FATAL_ERROR "KOALA_BACKEND=GPU requested, but GPU setup failed:\n${KOALA_GPU_PROBE_ERROR}")
+elseif(KOALA_GPU_PROBE_OK)
+    set(KOALA_SELECTED_BACKEND "GPU")
+else()
+    set(KOALA_SELECTED_BACKEND "CPU")
+    if(_koala_backend_requested STREQUAL "AUTO")
+        message(STATUS "GPU unavailable; falling back to CPU: ${KOALA_GPU_PROBE_ERROR}")
     endif()
 endif()
-if(NOT GPU_CLANGXX OR NOT EXISTS "${GPU_CLANGXX}")
-    message(FATAL_ERROR
-        "No GPU Clang++ compiler was found. Install Clang 17+ with AMDGPU "
-        "OpenMP offloading, or configure with -DGPU_CLANGXX=/path/to/clang++."
-    )
+message(STATUS "Selected backend: ${KOALA_SELECTED_BACKEND}")
+if(KOALA_SELECTED_BACKEND STREQUAL "GPU")
+    message(STATUS "GPU compiler: Clang ${GPU_CLANG_VERSION} (${GPU_CLANGXX})")
+    if(_koala_compatible_gcc_install_dir)
+        message(STATUS "GPU C++ headers: ${_koala_compatible_gcc_install_dir}")
+    endif()
+    message(STATUS "GPU architecture: ${GPU_ARCH}")
 endif()
-
-execute_process(
-    COMMAND "${GPU_CLANGXX}" --version
-    OUTPUT_VARIABLE GPU_CLANG_VERSION_OUTPUT
-    RESULT_VARIABLE GPU_CLANG_VERSION_RESULT
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-)
-string(REGEX MATCH "version ([0-9]+)\\."
-    _gpu_clang_version_match "${GPU_CLANG_VERSION_OUTPUT}")
-if(NOT GPU_CLANG_VERSION_RESULT EQUAL 0 OR
-   NOT CMAKE_MATCH_1 OR CMAKE_MATCH_1 LESS 17)
-    message(FATAL_ERROR
-        "GPU compiler '${GPU_CLANGXX}' must be Clang 17 or newer. "
-        "Detected: ${GPU_CLANG_VERSION_OUTPUT}"
-    )
-endif()
-set(GPU_CLANG_VERSION "${CMAKE_MATCH_1}")
-
-get_filename_component(_gpu_clang_real_path "${GPU_CLANGXX}" REALPATH)
-get_filename_component(_gpu_clang_bin_dir "${_gpu_clang_real_path}" DIRECTORY)
-get_filename_component(_gpu_llvm_root "${_gpu_clang_bin_dir}" DIRECTORY)
-
-find_library(GPU_OMP_LIBRARY
-    NAMES omp
-    HINTS "${_gpu_llvm_root}/lib" "${_gpu_llvm_root}/lib64"
-          "${_gpu_llvm_root}/lib/x86_64-linux-gnu"
-)
-find_library(GPU_OMPTARGET_LIBRARY
-    NAMES omptarget
-    HINTS "${_gpu_llvm_root}/lib" "${_gpu_llvm_root}/lib64"
-          "${_gpu_llvm_root}/lib/x86_64-linux-gnu"
-)
-if(NOT GPU_OMP_LIBRARY OR NOT GPU_OMPTARGET_LIBRARY)
-    message(FATAL_ERROR
-        "GPU Clang ${GPU_CLANG_VERSION} was found at '${GPU_CLANGXX}', but its "
-        "OpenMP runtime libraries (libomp and libomptarget) were not found "
-        "under '${_gpu_llvm_root}'. Install the matching LLVM OpenMP runtime."
-    )
-endif()
-get_filename_component(GPU_LLVM_LIB_DIR "${GPU_OMP_LIBRARY}" DIRECTORY)
-
-# Verify the complete OpenMP AMDGPU compile-and-link path during configuration
-# so missing offload components fail with an actionable diagnostic.
-set(_gpu_offload_probe "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/koala-offload-probe.cpp")
-set(_gpu_offload_probe_exe "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/koala-offload-probe")
-file(WRITE "${_gpu_offload_probe}"
-    "int main() {\n"
-    "  int value = 0;\n"
-    "  #pragma omp target map(tofrom: value)\n"
-    "  { value = 1; }\n"
-    "  return value == 1 ? 0 : 1;\n"
-    "}\n"
-)
-execute_process(
-    COMMAND "${GPU_CLANGXX}"
-        ${_koala_gcc_toolchain_args}
-        -std=c++20
-        -fopenmp
-        -fopenmp-targets=amdgcn-amd-amdhsa
-        -Xopenmp-target=amdgcn-amd-amdhsa
-        "-march=${GPU_ARCH}"
-        "${_gpu_offload_probe}"
-        "-L${GPU_LLVM_LIB_DIR}"
-        "-Wl,-rpath,${GPU_LLVM_LIB_DIR}"
-        -lomptarget
-        -lomp
-        -o "${_gpu_offload_probe_exe}"
-    RESULT_VARIABLE GPU_OFFLOAD_PROBE_RESULT
-    OUTPUT_VARIABLE GPU_OFFLOAD_PROBE_OUTPUT
-    ERROR_VARIABLE GPU_OFFLOAD_PROBE_ERROR
-)
-if(NOT GPU_OFFLOAD_PROBE_RESULT EQUAL 0)
-    message(FATAL_ERROR
-        "Clang '${GPU_CLANGXX}' cannot compile and link an OpenMP offload "
-        "program for ${GPU_ARCH}. Install a Clang toolchain with the AMDGPU "
-        "OpenMP target, linker wrapper, device libraries, and matching libomp/"
-        "libomptarget.\n"
-        "${GPU_OFFLOAD_PROBE_OUTPUT}${GPU_OFFLOAD_PROBE_ERROR}"
-    )
-endif()
-message(STATUS "GPU compiler: Clang ${GPU_CLANG_VERSION} (${GPU_CLANGXX})")
-if(_koala_compatible_gcc_install_dir)
-    message(STATUS "GPU C++ headers: ${_koala_compatible_gcc_install_dir}")
-endif()
-message(STATUS "GPU architecture: ${GPU_ARCH}")
 
 add_executable(KoalaDataGen src/generator.cpp)
 target_include_directories(KoalaDataGen PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -255,6 +305,7 @@ add_custom_command(
     VERBATIM
 )
 
+if(KOALA_SELECTED_BACKEND STREQUAL "GPU")
 file(
     GLOB GPU_KERNEL_SOURCES
     CONFIGURE_DEPENDS
@@ -294,6 +345,7 @@ foreach(GPU_SRC IN LISTS GPU_KERNEL_SOURCES)
 endforeach()
 
 add_custom_target(GpuKernels DEPENDS ${GPU_KERNEL_OBJECTS})
+endif()
 
 add_library(Koala1HostObjects OBJECT
     main.cpp
@@ -309,6 +361,9 @@ target_include_directories(Koala1HostObjects PRIVATE
 target_compile_definitions(Koala1HostObjects PRIVATE
     KOALA_FFT_BINARY_FILE="${BIN_FILE}"
 )
+if(KOALA_SELECTED_BACKEND STREQUAL "CPU")
+    target_compile_definitions(Koala1HostObjects PRIVATE KOALA_CPU_BACKEND=1)
+endif()
 target_compile_features(Koala1HostObjects PRIVATE cxx_std_23)
 set_target_properties(Koala1HostObjects PROPERTIES
     CXX_STANDARD 23
@@ -326,6 +381,7 @@ target_compile_options(Koala1HostObjects PRIVATE
 )
 
 set(KOALA1_EXE "${CMAKE_CURRENT_BINARY_DIR}/Koala1")
+if(KOALA_SELECTED_BACKEND STREQUAL "GPU")
 add_custom_command(
     OUTPUT "${KOALA1_EXE}"
     COMMAND "${GPU_CLANGXX}"
@@ -350,11 +406,32 @@ add_custom_command(
     VERBATIM
     COMMENT "Linking Koala1 with Clang OpenMP AMDGPU offloading"
 )
+else()
+    add_custom_command(
+        OUTPUT "${KOALA1_EXE}"
+        COMMAND "${CMAKE_CXX_COMPILER}"
+            ${_koala_host_toolchain_args}
+            $<TARGET_OBJECTS:Koala1HostObjects>
+            -o "${KOALA1_EXE}"
+        DEPENDS
+            Koala1HostObjects
+            "${BIN_FILE}"
+            "${FFT_INCLUDE_FILE}"
+        COMMAND_EXPAND_LISTS
+        VERBATIM
+        COMMENT "Linking Koala1 for CPU"
+    )
+endif()
 
 add_custom_target(Koala1Build ALL DEPENDS "${KOALA1_EXE}")
-add_dependencies(Koala1Build Koala1HostObjects GpuKernels)
+add_dependencies(Koala1Build Koala1HostObjects)
+if(KOALA_SELECTED_BACKEND STREQUAL "GPU")
+    add_dependencies(Koala1Build GpuKernels)
+endif()
 
 message(STATUS "Host C++ standard: C++${KOALA_HOST_CXX_STANDARD}")
 message(STATUS "Host OpenMP: disabled")
-message(STATUS "GPU C++ standard: C++20")
-message(STATUS "GPU OpenMP offloading: AMDGPU ${GPU_ARCH}")
+if(KOALA_SELECTED_BACKEND STREQUAL "GPU")
+    message(STATUS "GPU C++ standard: C++20")
+    message(STATUS "GPU OpenMP offloading: AMDGPU ${GPU_ARCH}")
+endif()

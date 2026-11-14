@@ -22,11 +22,11 @@ The goal is not simply to reproduce existing engines, but to explore a different
 
 ## Dependencies
 
-Koala 1 requires a C++ host compiler, an LLVM/Clang GPU toolchain and AMDGPU OpenMP Offloading support.
+Koala 1 requires a C++ host compiler. The LLVM/Clang AMDGPU toolchain is optional when using the CPU backend.
 
 ### 1. Build Dependencies (Ubuntu / Linux Mint)
 
-Install the standard development tools and LLVM packages:
+Install the standard development tools:
 
 ```bash
 sudo apt update
@@ -34,9 +34,13 @@ sudo apt update
 sudo apt install -y \
     git \
     build-essential \
-    cmake \
-    gcc \
-    g++ \
+    cmake
+```
+
+For GPU builds, also install LLVM packages:
+
+```bash
+sudo apt install -y \
     llvm-17 \
     llvm-17-dev \
     clang-17 \
@@ -50,9 +54,9 @@ sudo apt install -y \
 - Clang 17+ for GPU kernel compilation.
 - CMake 3.28 or newer.
 
-### 2. AMD GPU Compute Dependencies
+### 2. GPU Compute Dependencies
 
-Koala 1 uses AMDGPU OpenMP Offloading.
+The GPU backend uses AMDGPU OpenMP Offloading.
 
 The GPU toolchain must provide:
 
@@ -96,16 +100,19 @@ cd Koala-1-Spectral-Chess-Engine-
 
 ### 5. Configure
 
-Configure the project using CMake:
+By default, CMake uses `KOALA_BACKEND=AUTO`: it selects GPU if the GPU toolchain probe succeeds, otherwise it falls back to CPU. Select a backend explicitly with an environment variable or CMake option:
 
 ```bash
-cmake -S . -B build
+KOALA_BACKEND=AUTO cmake -S . -B build
+# or: cmake -S . -B build -DKOALA_BACKEND=GPU
+# or: cmake -S . -B build -DKOALA_BACKEND=CPU
 ```
 
-If GPU Clang is not detected automatically, specify its location and GPU architecture:
+`GPU` requires a working GPU toolchain; specify its location and architecture if needed:
 
 ```bash
 cmake -S . -B build \
+    -DKOALA_BACKEND=GPU \
     -DGPU_CLANGXX=/path/to/clang++ \
     -DGPU_ARCH=gfx803
 ```
@@ -124,7 +131,7 @@ CMake automatically:
 
 - Builds the FFT data generator.
 - Generates the FFT binary and C++ initializer.
-- Compiles AMDGPU kernels.
+- Compiles AMDGPU kernels when the GPU backend is selected.
 - Compiles the host application.
 - Links the final executable.
 
@@ -136,7 +143,7 @@ Start the engine:
 ./build/Koala1
 ```
 
-**Note:** The GPU compiler, OpenMP offloading runtime and AMDGPU device libraries must belong to a compatible toolchain installation.
+**Note:** GPU builds require a compatible GPU compiler, OpenMP offloading runtime and AMDGPU device libraries.
 
 ---
 
