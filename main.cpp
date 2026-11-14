@@ -16,9 +16,19 @@
 
 GameState CURRENT_POSITION{Board{}};
 
+#ifndef KOALA_FFT_BINARY_FILE
+#define KOALA_FFT_BINARY_FILE "weights/fft_32x8x8.bin"
+#endif
+
 alignas(64)  unsigned char EmbeddedFftBlob[] = {
-    #embed "weights/fft_32x8x8.bin"
+#if defined(__cpp_pp_embed)
+    #embed KOALA_FFT_BINARY_FILE
+#else
+    #include "fft_32x8x8.bin.inc"
+#endif
 };
+
+#undef KOALA_FFT_BINARY_FILE
 
 void debug(const TreeStateWrapper&, const FFTWorking&){
     std::cerr << "[SIZE] Node<Board>: "

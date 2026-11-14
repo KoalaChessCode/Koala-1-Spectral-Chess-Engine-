@@ -6,6 +6,7 @@ DATA/
 
 
 weights/*.bin
+weights/*.bin.inc
 weights/*.sgat
 training_data/
 
