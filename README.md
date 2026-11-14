@@ -18,6 +18,9 @@ The project explores:
 
 The goal is not simply to reproduce existing engines, but to explore a different way of representing and evaluating chess positions.
 
+## Build Backend
+
+CMake defaults to `KOALA_BACKEND=AUTO`, which selects GPU when its toolchain probe succeeds and otherwise falls back to CPU. Set `KOALA_BACKEND=CPU` (or `-DKOALA_BACKEND=CPU`) to build without GPU dependencies, or `KOALA_BACKEND=GPU` to require the GPU toolchain.
 ## Development
 
 The project is developed openly. New features, experiments and architectural changes will be published as development progresses.
