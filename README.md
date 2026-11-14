@@ -90,7 +90,7 @@ A separate proprietary graphics driver installation is not normally required whe
 ### 4. Clone Repository
 
 ```bash
-git clone https://github.com/KoalaChessCode/Koala1.git
+https://github.com/KoalaChessCode/Koala-1-Spectral-Chess-Engine-.git
 cd Koala1
 ```
 
